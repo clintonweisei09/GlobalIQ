@@ -21,7 +21,7 @@ export default function VerifyEmailPage() {
   const [verifying, setVerifying] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, sendVerificationCode, verifyVerificationCode } = useAuth();
+  const { user, resendSignupConfirmation, verifyVerificationCode } = useAuth();
 
   const verificationMethod = location.state?.verificationMethod || (user?.phone ? 'phone' : 'email');
   const contact = location.state?.contact || (verificationMethod === 'phone' ? user?.phone : user?.email);
@@ -37,7 +37,7 @@ export default function VerifyEmailPage() {
     setResending(true);
     setError('');
     try {
-      const result = await sendVerificationCode(contact, isPhone ? 'phone' : 'email');
+      const result = await resendSignupConfirmation(contact, isPhone ? 'phone' : 'email');
       if (result.error) {
         setError(result.error);
         return;
@@ -97,7 +97,7 @@ export default function VerifyEmailPage() {
 
           <h1 className="text-2xl font-bold text-secondary-900 mb-2">Verify your {isPhone ? 'mobile number' : 'email'}</h1>
           <p className="text-secondary-600 mb-6">
-            We've sent a verification code to
+            {isPhone ? 'We\'ve sent a verification code to' : 'We\'ve sent a confirmation link to'}
             <br />
             <strong className="text-secondary-900">{contact}</strong>
           </p>
@@ -108,7 +108,7 @@ export default function VerifyEmailPage() {
             <div className="mb-6 flex items-center justify-center gap-2 rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
               <CheckCircle className="w-5 h-5" /> Verified. Opening your dashboard...
             </div>
-          ) : (
+          ) : isPhone ? (
             <form onSubmit={handleVerify} className="mb-6 space-y-3">
               <label htmlFor="verification-code" className="sr-only">Verification code</label>
               <div className="relative">
@@ -128,6 +128,10 @@ export default function VerifyEmailPage() {
                 {verifying ? <><Loader2 className="mr-2 inline h-5 w-5 animate-spin" /> Verifying...</> : 'Verify code'}
               </button>
             </form>
+          ) : (
+            <div className="mb-6 rounded-xl bg-emerald-50 px-4 py-4 text-left text-sm text-emerald-800">
+              Open the confirmation link in your email. This page will continue automatically when verification is complete.
+            </div>
           )}
 
           <div className="bg-secondary-50 rounded-xl p-4 mb-6">
@@ -135,7 +139,7 @@ export default function VerifyEmailPage() {
               <CheckCircle className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
               <div className="text-left text-sm text-secondary-600">
                 <p className="font-medium text-secondary-900 mb-1">Check your inbox</p>
-                <p>Enter the code sent to you to verify your account. Codes expire shortly for your security.</p>
+                <p>{isPhone ? 'Enter the code sent to you to verify your account. Codes expire shortly for your security.' : 'Use the confirmation link in your email to activate your account securely.'}</p>
               </div>
             </div>
           </div>
@@ -154,12 +158,12 @@ export default function VerifyEmailPage() {
               ) : resent ? (
                 <>
                   <CheckCircle className="w-5 h-5 text-primary-600" />
-                  Code sent!
+                  {isPhone ? 'Code sent!' : 'Email sent!'}
                 </>
               ) : (
                 <>
                   <RefreshCw className="w-5 h-5" />
-                  Resend verification code
+                  {isPhone ? 'Resend verification code' : 'Resend confirmation email'}
                 </>
               )}
             </button>
@@ -168,7 +172,7 @@ export default function VerifyEmailPage() {
               to="/auth/signup"
               className="block w-full text-secondary-600 py-3 px-4 rounded-lg font-medium hover:bg-secondary-50 transition-colors"
             >
-              Use a different email
+              Use a different contact
             </Link>
           </div>
 

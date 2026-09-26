@@ -15,15 +15,15 @@ import {
 } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('developer@gmail.com');
-  const [password, setPassword] = useState('developer@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [method, setMethod] = useState<'email' | 'phone'>('email');
   const [loginMode, setLoginMode] = useState<'password' | 'code'>('password');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(false);
   const { signIn, sendVerificationCode, verifyVerificationCode, user } = useAuth();
   const navigate = useNavigate();
 
@@ -38,7 +38,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    const contact = email;
+    const contact = email.trim();
     if (loginMode === 'code') {
       if (code.length < 6) {
         setError('Enter the 6-digit verification code.');
@@ -55,7 +55,13 @@ export default function LoginPage() {
       return;
     }
 
-    const { error: signInError } = await signIn(email, password);
+    if (method !== 'email') {
+      setError('Use the verification code option to sign in with SMS.');
+      setLoading(false);
+      return;
+    }
+
+    const { error: signInError } = await signIn(contact, password);
 
     if (signInError) {
       setError(signInError);
@@ -101,8 +107,8 @@ export default function LoginPage() {
                   {method === 'email' ? 'Email address' : 'Mobile number'}
                 </label>
                 <div className="flex gap-1 rounded-lg bg-secondary-100 p-1 text-xs">
-                  <button type="button" onClick={() => { setMethod('email'); setEmail(''); }} className={`px-2 py-1 rounded-md ${method === 'email' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>Email</button>
-                  <button type="button" onClick={() => { setMethod('phone'); setEmail(''); }} className={`px-2 py-1 rounded-md ${method === 'phone' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>SMS</button>
+                  <button type="button" onClick={() => { setMethod('email'); setEmail(''); setLoginMode('password'); }} className={`px-2 py-1 rounded-md ${method === 'email' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>Email</button>
+                  <button type="button" onClick={() => { setMethod('phone'); setEmail(''); setLoginMode('code'); }} className={`px-2 py-1 rounded-md ${method === 'phone' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>SMS</button>
                 </div>
               </div>
               <div className="relative">

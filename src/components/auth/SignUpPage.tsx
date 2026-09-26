@@ -58,7 +58,7 @@ export default function SignUpPage() {
 
     setLoading(true);
 
-    const { error: signUpError } = await signUp(contact, password, userType, verificationMethod);
+    const { error: signUpError, needsVerification } = await signUp(contact, password, userType, verificationMethod);
 
     if (signUpError) {
       setError(signUpError);
@@ -70,13 +70,17 @@ export default function SignUpPage() {
     setLoading(false);
 
     setTimeout(() => {
+      if (!needsVerification) {
+        navigate('/dashboard', { replace: true });
+        return;
+      }
       navigate('/auth/verify-email', {
         state: {
           contact: verificationMethod === 'phone' ? contact.replace(/[\s-]/g, '').replace(/^0/, '+254') : contact,
           verificationMethod,
         },
       });
-    }, 2000);
+    }, 1200);
   };
 
   if (success) {

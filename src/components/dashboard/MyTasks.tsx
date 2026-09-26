@@ -13,7 +13,6 @@ import {
   BarChart3,
   FileText,
   Play,
-  DollarSign,
   Hourglass,
   Banknote,
   ArrowRight,
@@ -169,31 +168,37 @@ export default function MyTasks() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl lg:text-3xl font-bold text-secondary-900 mb-2">My Tasks</h1>
+        <div className="flex items-center gap-3 mb-2">
+          <h1 className="text-2xl lg:text-3xl font-bold text-secondary-900">My Tasks</h1>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+            Live activity
+          </span>
+        </div>
         <p className="text-secondary-600">Manage and track your assigned tasks</p>
       </div>
 
       {/* Stats Overview */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-white border border-secondary-200 rounded-xl p-4">
+        <div className="bg-white border border-red-200 rounded-xl p-4 shadow-sm shadow-red-100 animate-slide-up">
           <p className="text-sm text-secondary-500">Total Tasks</p>
-          <p className="text-2xl font-bold text-secondary-900">{stats.total}</p>
+          <p className="text-2xl font-bold text-red-600">{stats.total}</p>
         </div>
-        <div className="bg-white border border-secondary-200 rounded-xl p-4">
+        <div className="bg-white border border-secondary-200 rounded-xl p-4 animate-slide-up [animation-delay:80ms]">
           <p className="text-sm text-secondary-500">In Progress</p>
           <p className="text-2xl font-bold text-amber-600">{stats.inProgress}</p>
         </div>
-        <div className="bg-white border border-secondary-200 rounded-xl p-4">
+        <div className="bg-white border border-secondary-200 rounded-xl p-4 animate-slide-up [animation-delay:160ms]">
           <p className="text-sm text-secondary-500">Pending Review</p>
           <p className="text-2xl font-bold text-purple-600">{stats.pending}</p>
         </div>
-        <div className="bg-white border border-secondary-200 rounded-xl p-4">
+        <div className="bg-white border border-secondary-200 rounded-xl p-4 animate-slide-up [animation-delay:240ms]">
           <p className="text-sm text-secondary-500">Processing</p>
           <p className="text-2xl font-bold text-blue-600">{stats.processing}</p>
         </div>
-        <div className="bg-white border border-secondary-200 rounded-xl p-4">
+        <div className="bg-white border border-red-200 rounded-xl p-4 shadow-sm shadow-red-100 animate-slide-up [animation-delay:320ms]">
           <p className="text-sm text-secondary-500">Total Paid</p>
-          <p className="text-2xl font-bold text-green-600">${stats.earnings.toFixed(2)}</p>
+          <p className="text-2xl font-bold text-red-600">${stats.earnings.toFixed(2)}</p>
         </div>
       </div>
 
@@ -234,10 +239,10 @@ export default function MyTasks() {
             const payStep = getPaymentStepIndex(userTask.status, userTask.payment_status);
             const showPaymentFlow = payStep >= 0;
             return (
-              <div key={userTask.id} className="bg-white border border-secondary-200 rounded-xl p-6">
+              <div key={userTask.id} className="bg-white border border-secondary-200 rounded-xl p-6 transition-all duration-300 hover:-translate-y-1 hover:border-red-200 hover:shadow-lg hover:shadow-red-100/50">
                 <div className="flex flex-col lg:flex-row lg:items-center gap-4">
                   <div className="flex items-start gap-4 flex-1">
-                    <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center text-primary-600">
+                    <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center text-red-600 animate-float">
                       {taskTypeIcons[task.task_type] || <Brain className="w-5 h-5" />}
                     </div>
                     <div className="flex-1">

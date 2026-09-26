@@ -16,9 +16,10 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  signUp: (contact: string, password: string, userType: 'worker' | 'client', verificationMethod: 'email' | 'phone') => Promise<{ error: string | null }>;
+  signUp: (contact: string, password: string, userType: 'worker' | 'client', verificationMethod: 'email' | 'phone') => Promise<{ error: string | null; needsVerification: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   sendVerificationCode: (contact: string, method: 'email' | 'phone') => Promise<{ error: string | null }>;
+  resendSignupConfirmation: (contact: string, method: 'email' | 'phone') => Promise<{ error: string | null }>;
   verifyVerificationCode: (contact: string, code: string, method: 'email' | 'phone') => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
@@ -189,33 +190,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? 'SMS verification is not enabled for this Supabase project. Enable a phone provider in Supabase Auth, then try again.'
           : error.message;
         setState(prev => ({ ...prev, loading: false, error: message }));
-        return { error: message };
+        return { error: message, needsVerification: false };
       }
 
       if (!data.user) {
         const message = 'We could not create your account. Please try again.';
         setState(prev => ({ ...prev, loading: false, error: message }));
-        return { error: message };
+        return { error: message, needsVerification: false };
       }
 
       if (data.user.identities && data.user.identities.length === 0) {
         const message = 'An account with this contact already exists. Please sign in or use another one.';
         setState(prev => ({ ...prev, loading: false, error: message }));
-        return { error: message };
-      }
-
-      const codeResult = await sendVerificationCode(contact, verificationMethod);
-      if (codeResult.error) {
-        setState(prev => ({ ...prev, loading: false, error: codeResult.error }));
-        return codeResult;
+        return { error: message, needsVerification: false };
       }
 
       setState(prev => ({ ...prev, loading: false }));
-      return { error: null };
+      return { error: null, needsVerification: !data.session };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An error occurred during sign up';
       setState(prev => ({ ...prev, loading: false, error: message }));
-      return { error: message };
+      return { error: message, needsVerification: false };
     }
   };
 
@@ -235,6 +230,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: null };
     } catch (error) {
       return { error: error instanceof Error ? error.message : 'Unable to send verification code.' };
+    }
+  };
+
+  const resendSignupConfirmation = async (contact: string, method: 'email' | 'phone') => {
+    try {
+      const result = method === 'phone'
+        ? await supabase.auth.resend({ type: 'sms', phone: normalizePhone(contact) })
+        : await supabase.auth.resend({
+            type: 'signup',
+            email: contact,
+            options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          });
+      return { error: result.error?.message || null };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Unable to resend the confirmation.' };
     }
   };
 
@@ -360,6 +370,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...state,
         signUp,
         signIn,
+        sendVerificationCode,
+        verifyVerificationCode,
+        resendSignupConfirmation,
         signOut,
         resetPassword,
         updatePassword,

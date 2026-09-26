@@ -17,6 +17,7 @@ import {
   Loader2,
   TrendingUp,
   Wallet as WalletIcon,
+  Building2,
   Zap,
   X,
   PartyPopper,
@@ -35,7 +36,8 @@ const statusConfig: Record<string, { color: string; bg: string; icon: React.Reac
   cancelled: { color: 'text-secondary-700', bg: 'bg-secondary-50 border-secondary-200', icon: <X className="w-4 h-4" />, label: 'Cancelled' },
 };
 
-const KES_RATE = 150;
+const KES_RATE = 129.53;
+const KENYAN_BANKS = ['Equity Bank Kenya', 'KCB Bank Kenya', 'Co-operative Bank', 'Stanbic Bank Kenya', 'I&M Bank Kenya'];
 
 export default function MpesaWithdrawals() {
   const { profile, wallet, refreshWallet } = useAuth();
@@ -45,8 +47,14 @@ export default function MpesaWithdrawals() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawPhone, setWithdrawPhone] = useState('');
+  const [withdrawMethod, setWithdrawMethod] = useState<'mpesa' | 'bank'>('mpesa');
+  const [bankName, setBankName] = useState(KENYAN_BANKS[0]);
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankBranchCode, setBankBranchCode] = useState('');
   const [withdrawStage, setWithdrawStage] = useState<'idle' | 'initiating' | 'waiting' | 'success' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [successInfo, setSuccessInfo] = useState<{ kes: number; recipient: string } | null>(null);
   const [withdrawDestination, setWithdrawDestination] = useState<'phone' | 'till'>('phone');
   const [withdrawTillNumber, setWithdrawTillNumber] = useState('1712962');
@@ -151,14 +159,19 @@ export default function MpesaWithdrawals() {
       return;
     }
 
+    if (withdrawMethod === 'bank' && (!bankName || !bankAccountName.trim() || !bankAccountNumber.trim() || !bankBranchCode.trim())) {
+      setError('Complete your bank name, account name, account number, and branch code.');
+      return;
+    }
+
     const cleanPhone = withdrawPhone.replace(/[\s\-()]/g, '');
     const cleanTillNumber = withdrawTillNumber.replace(/\s/g, '');
     const phoneRegex = /^(07\d{8}|01\d{8}|2547\d{8}|\+2547\d{8}|\+2541\d{8}|2541\d{8})$/;
-    if (withdrawDestination === 'phone' && !phoneRegex.test(cleanPhone)) {
+    if (withdrawMethod === 'mpesa' && withdrawDestination === 'phone' && !phoneRegex.test(cleanPhone)) {
       setError('Please enter a valid phone number (e.g., 0712345678 or 254712345678)');
       return;
     }
-    if (withdrawDestination === 'till' && !/^\d{5,7}$/.test(cleanTillNumber)) {
+    if (withdrawMethod === 'mpesa' && withdrawDestination === 'till' && !/^\d{5,7}$/.test(cleanTillNumber)) {
       setError('Please enter a valid M-Pesa till number.');
       return;
     }
@@ -175,7 +188,7 @@ export default function MpesaWithdrawals() {
         return;
       }
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mpesa-b2c-withdrawal`;
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${withdrawMethod === 'bank' ? 'bank-transfer-request' : 'mpesa-b2c-withdrawal'}`;
       const resp = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -184,10 +197,14 @@ export default function MpesaWithdrawals() {
           apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({
-          phone: withdrawDestination === 'phone' ? cleanPhone : undefined,
-          destinationType: withdrawDestination,
-          tillNumber: withdrawDestination === 'till' ? cleanTillNumber : undefined,
           amountUSD: amount,
+          phone: withdrawMethod === 'mpesa' && withdrawDestination === 'phone' ? cleanPhone : undefined,
+          destinationType: withdrawMethod === 'mpesa' ? withdrawDestination : undefined,
+          tillNumber: withdrawMethod === 'mpesa' && withdrawDestination === 'till' ? cleanTillNumber : undefined,
+          bankName: withdrawMethod === 'bank' ? bankName : undefined,
+          bankAccountName: withdrawMethod === 'bank' ? bankAccountName.trim() : undefined,
+          bankAccountNumber: withdrawMethod === 'bank' ? bankAccountNumber.trim() : undefined,
+          bankBranchCode: withdrawMethod === 'bank' ? bankBranchCode.trim() : undefined,
         }),
       });
 
@@ -196,6 +213,14 @@ export default function MpesaWithdrawals() {
       if (!resp.ok) {
         setWithdrawStage('failed');
         setError(data.error || 'Failed to initiate withdrawal. Please try again.');
+        return;
+      }
+
+      if (withdrawMethod === 'bank' && data.status === 'pending') {
+        setWithdrawStage('idle');
+        setNotice('Bank transfer request received. It is pending review and will be processed by the payout team.');
+        await refreshWallet();
+        loadData();
         return;
       }
 
@@ -255,7 +280,7 @@ export default function MpesaWithdrawals() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Hero Header */}
-      <div className="bg-gradient-to-br from-green-600 via-emerald-700 to-teal-800 rounded-3xl p-6 lg:p-8 text-white relative overflow-hidden">
+      <div className="bg-gradient-to-br from-red-600 via-rose-700 to-emerald-800 rounded-3xl p-6 lg:p-8 text-white relative overflow-hidden">
         <div className="absolute top-0 right-0 w-72 h-72 bg-white/5 rounded-full -translate-y-1/3 translate-x-1/3" />
         <div className="absolute bottom-0 left-0 w-56 h-56 bg-white/5 rounded-full translate-y-1/3 -translate-x-1/4" />
         <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -266,10 +291,17 @@ export default function MpesaWithdrawals() {
               </div>
               <div>
                 <h1 className="text-2xl lg:text-3xl font-bold">M-Pesa Withdrawals</h1>
-                <p className="text-green-100 text-sm">Withdraw your earnings directly to M-Pesa — instantly</p>
+                <p className="text-red-100 text-sm">Withdraw your earnings directly to M-Pesa — instantly</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-4 mt-4">
+              <div className="bg-red-500/25 rounded-xl px-4 py-2 backdrop-blur-sm animate-pulse">
+                <div className="flex items-center gap-2">
+                  <p className="text-red-100 text-xs">Live exchange rate</p>
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-200" />
+                </div>
+                <p className="text-xl font-bold">1 USD = 129.53 KES</p>
+              </div>
               <div className="bg-white/10 rounded-xl px-4 py-2 backdrop-blur-sm">
                 <div className="flex items-center gap-2">
                   <p className="text-green-100 text-xs">Available Balance</p>
@@ -314,9 +346,14 @@ export default function MpesaWithdrawals() {
           <button
             onClick={() => {
               setWithdrawPhone(wallet?.mpesa_phone || '');
+              setWithdrawMethod('mpesa');
+              setBankAccountName('');
+              setBankAccountNumber('');
+              setBankBranchCode('');
               setWithdrawAmount('');
               setWithdrawStage('idle');
               setError(null);
+              setNotice(null);
               setSuccessInfo(null);
               setShowWithdrawModal(true);
             }}
@@ -354,12 +391,13 @@ export default function MpesaWithdrawals() {
             <ShieldCheck className="w-5 h-5 text-green-600 dark:text-green-400" />
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-green-900 dark:text-green-300 mb-3">How M-Pesa Withdrawals Work</h3>
+            <h3 className="font-semibold text-green-900 dark:text-green-300 mb-3">How withdrawals work</h3>
             <div className="grid md:grid-cols-2 gap-3">
               {[
                 'Enter the amount you want to withdraw in USD',
                 'Provide your M-Pesa phone number (Safaricom)',
-                'We convert to KES at the current rate (1 USD = 150 KES)',
+                'Or choose a Kenyan bank and submit your account details for review',
+                'We convert to KES at the current rate (1 USD = 129.53 KES)',
                 'You receive a real M-Pesa message on your phone with the funds',
                 'Earnings are locked for 48 hours before withdrawal',
                 'No hidden fees — EarnIQ covers all transfer charges',
@@ -484,9 +522,14 @@ export default function MpesaWithdrawals() {
             <button
               onClick={() => {
                 setWithdrawPhone(wallet?.mpesa_phone || '');
+                setWithdrawMethod('mpesa');
+                setBankAccountName('');
+                setBankAccountNumber('');
+                setBankBranchCode('');
                 setWithdrawAmount('');
                 setWithdrawStage('idle');
                 setError(null);
+                setNotice(null);
                 setSuccessInfo(null);
                 setShowWithdrawModal(true);
               }}
@@ -585,6 +628,12 @@ export default function MpesaWithdrawals() {
                       {error}
                     </div>
                   )}
+                  {notice && (
+                    <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-sm text-emerald-700 dark:text-emerald-300 flex items-start gap-2">
+                      <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      {notice}
+                    </div>
+                  )}
 
                   {/* Waiting State */}
                   {withdrawStage === 'waiting' && (
@@ -610,12 +659,32 @@ export default function MpesaWithdrawals() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mb-4">
-                    <button type="button" onClick={() => setWithdrawDestination('phone')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'phone' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>Phone number</button>
-                    <button type="button" onClick={() => setWithdrawDestination('till')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'till' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>Till number</button>
+                    <button type="button" onClick={() => { setWithdrawMethod('mpesa'); setError(null); setNotice(null); }} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawMethod === 'mpesa' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>
+                      <Phone className="w-4 h-4" /> M-Pesa
+                    </button>
+                    <button type="button" onClick={() => { setWithdrawMethod('bank'); setError(null); setNotice(null); }} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawMethod === 'bank' ? 'border-red-500 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>
+                      <Building2 className="w-4 h-4" /> Kenyan bank
+                    </button>
                   </div>
 
+                  {withdrawMethod === 'mpesa' && <div className="grid grid-cols-2 gap-2 mb-4">
+                    <button type="button" onClick={() => setWithdrawDestination('phone')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'phone' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>Phone number</button>
+                    <button type="button" onClick={() => setWithdrawDestination('till')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'till' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>Till number</button>
+                  </div>}
+
                   {/* M-Pesa Destination Input */}
-                  {withdrawDestination === 'phone' ? <div className="mb-4">
+                  {withdrawMethod === 'bank' ? <div className="mb-4 space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">Kenyan bank</label>
+                      <select value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={withdrawStage === 'initiating'} className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-red-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white disabled:opacity-60">
+                        {KENYAN_BANKS.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
+                      </select>
+                    </div>
+                    <input value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} placeholder="Account holder name" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-red-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                    <input value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} inputMode="numeric" placeholder="Account number" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-red-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                    <input value={bankBranchCode} onChange={(e) => setBankBranchCode(e.target.value)} inputMode="numeric" placeholder="Branch code" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-red-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                    <p className="text-xs text-secondary-500 dark:text-secondary-400">Bank transfers are reviewed and processed securely. Keep your account details accurate.</p>
+                  </div> : withdrawDestination === 'phone' ? <div className="mb-4">
                     <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
                       M-Pesa Phone Number
                     </label>
@@ -694,7 +763,7 @@ export default function MpesaWithdrawals() {
                   {/* Security Note */}
                   <div className="flex items-center gap-2 text-xs text-secondary-500 dark:text-secondary-400 mb-5">
                     <ShieldCheck className="w-4 h-4 text-green-600 dark:text-green-400" />
-                    Secured by Safaricom M-Pesa {withdrawDestination === 'phone' ? 'B2C' : 'B2B'} API
+                    {withdrawMethod === 'bank' ? 'Bank transfer details are encrypted and reviewed securely' : `Secured by Safaricom M-Pesa ${withdrawDestination === 'phone' ? 'B2C' : 'B2B'} API`}
                   </div>
 
                   {/* Action Buttons */}
@@ -707,6 +776,7 @@ export default function MpesaWithdrawals() {
                         setError(null);
                         setWithdrawAmount('');
                         setWithdrawPhone('');
+                        setNotice(null);
                       }}
                       disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting'}
                       className="flex-1 py-3 rounded-xl font-medium text-secondary-600 dark:text-secondary-400 bg-secondary-100 dark:bg-secondary-700 hover:bg-secondary-200 dark:hover:bg-secondary-600 transition-colors disabled:opacity-50"
@@ -715,7 +785,7 @@ export default function MpesaWithdrawals() {
                     </button>
                     <button
                       onClick={handleWithdraw}
-                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting' || (withdrawDestination === 'phone' ? !withdrawPhone : !withdrawTillNumber) || !withdrawAmount || parseFloat(withdrawAmount) < 1}
+                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting' || (withdrawMethod === 'mpesa' && (withdrawDestination === 'phone' ? !withdrawPhone : !withdrawTillNumber)) || (withdrawMethod === 'bank' && (!bankAccountName || !bankAccountNumber || !bankBranchCode)) || !withdrawAmount || parseFloat(withdrawAmount) < 1}
                       className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
                     >
                       {withdrawStage === 'initiating' || withdrawStage === 'waiting' ? (
@@ -726,7 +796,7 @@ export default function MpesaWithdrawals() {
                       ) : (
                         <>
                           <ArrowUpRight className="w-5 h-5" />
-                          Withdraw Now
+                          {withdrawMethod === 'bank' ? 'Request bank transfer' : 'Withdraw Now'}
                         </>
                       )}
                     </button>

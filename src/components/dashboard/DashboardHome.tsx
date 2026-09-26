@@ -38,7 +38,7 @@ import { Link } from 'react-router-dom';
 
 type UserTaskWithDetails = UserTask & { task: Task };
 
-const KES_RATE = 150;
+const KES_RATE = 129.53;
 
 export default function DashboardHome() {
   const { profile, wallet } = useAuth();

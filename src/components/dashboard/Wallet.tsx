@@ -39,7 +39,7 @@ import type { Withdrawal } from '../../types/database';
 import { Link } from 'react-router-dom';
 import { CURRENCIES, formatCurrency as formatInCurrency, currencyFromCountry, type CurrencyCode } from '../../lib/currency';
 
-const KES_RATE = 150;
+const KES_RATE = 129.53;
 type WalletTransaction = {
   id: string;
   status: string;
@@ -293,9 +293,15 @@ export default function Wallet() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 animate-slide-up">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-secondary-900 dark:text-white mb-1">Wallet</h1>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl lg:text-3xl font-bold text-secondary-900 dark:text-white">Wallet</h1>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 dark:bg-red-900/20 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400">
+              <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+              Live balance
+            </span>
+          </div>
           <p className="text-secondary-600 dark:text-secondary-400">Manage your earnings and withdraw to M-Pesa</p>
         </div>
         <button
@@ -326,8 +332,8 @@ export default function Wallet() {
       </div>
 
       {/* Premium Balance Card */}
-      <div className="bg-gradient-to-br from-secondary-900 via-secondary-800 to-secondary-900 dark:from-secondary-800 dark:via-secondary-700 dark:to-secondary-800 rounded-3xl p-6 lg:p-8 text-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-72 h-72 bg-green-500/10 rounded-full -translate-y-1/3 translate-x-1/3 blur-2xl" />
+      <div className="bg-gradient-to-br from-secondary-900 via-secondary-800 to-red-950 dark:from-secondary-800 dark:via-secondary-700 dark:to-red-950 rounded-3xl p-6 lg:p-8 text-white relative overflow-hidden animate-slide-up [animation-delay:120ms]">
+        <div className="absolute top-0 right-0 w-72 h-72 bg-red-500/15 rounded-full -translate-y-1/3 translate-x-1/3 blur-2xl animate-pulse" />
         <div className="absolute bottom-0 left-0 w-56 h-56 bg-blue-500/10 rounded-full translate-y-1/3 -translate-x-1/4 blur-2xl" />
 
         <div className="relative">
@@ -335,7 +341,7 @@ export default function Wallet() {
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center">
-                  <WalletIcon className="w-4 h-4 text-green-400" />
+                  <WalletIcon className="w-4 h-4 text-red-400" />
                 </div>
                 <p className="text-secondary-300 text-sm">Available Balance</p>
               </div>
@@ -379,7 +385,7 @@ export default function Wallet() {
                   )}
                 </div>
               </div>
-              <p className="text-secondary-400 text-sm mt-2">
+              <p className="text-red-200 text-sm mt-2">
                 ≈ {showBalance ? formatInCurrency(availableBalance, 'KES') : 'KSh ••••••••'}
               </p>
             </div>
@@ -402,7 +408,7 @@ export default function Wallet() {
               { label: 'Pending', value: pendingEarnings, icon: Clock, accent: 'text-amber-400' },
               { label: 'Locked (48h)', value: lockedEarnings, icon: ShieldCheck, accent: 'text-blue-400' },
               { label: 'Withdrawn', value: totalWithdrawn, icon: ArrowUpRight, accent: 'text-purple-400' },
-              { label: 'Available', value: withdrawableBalance, icon: CheckCircle2, accent: 'text-green-400' },
+                { label: 'Available', value: withdrawableBalance, icon: CheckCircle2, accent: 'text-red-400' },
             ].map((stat, i) => (
               <div key={i} className="bg-white/5 rounded-xl p-3 backdrop-blur-sm border border-white/5">
                 <div className="flex items-center gap-2 mb-1">
@@ -428,10 +434,10 @@ export default function Wallet() {
               <p className="text-sm text-secondary-500 dark:text-secondary-400">Your daily earnings this week</p>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
                 {formatCurrency(earningsData.reduce((sum, d) => sum + d.earnings, 0))}
               </p>
-              <p className="text-xs text-green-600 dark:text-green-400 flex items-center justify-end gap-1">
+                <p className="text-xs text-red-600 dark:text-red-400 flex items-center justify-end gap-1">
                 <TrendingUp className="w-3 h-3" />
                 +18.5% from last week
               </p>
@@ -456,7 +462,7 @@ export default function Wallet() {
                 <Area
                   type="monotone"
                   dataKey="earnings"
-                  stroke="#16a34a"
+                    stroke="#ef4444"
                   strokeWidth={2}
                   fillOpacity={1}
                   fill="url(#colorEarnings2)"
@@ -576,8 +582,8 @@ export default function Wallet() {
             {transactions.map((tx) => (
               <div key={tx.id} className="p-4 hover:bg-secondary-50 dark:hover:bg-secondary-700/30 transition-colors flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
-                    <ArrowDownRight className="w-5 h-5 text-green-600 dark:text-green-400" />
+                  <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
+                    <ArrowDownRight className="w-5 h-5 text-red-600 dark:text-red-400" />
                   </div>
                   <div>
                     <p className="font-medium text-secondary-900 dark:text-white">{tx.task?.title || 'Task Completed'}</p>
@@ -585,7 +591,7 @@ export default function Wallet() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="font-bold text-green-600 dark:text-green-400">+{formatCurrency(tx.earnings || tx.task?.payout_amount || 0)}</p>
+                  <p className="font-bold text-red-600 dark:text-red-400">+{formatCurrency(tx.earnings || tx.task?.payout_amount || 0)}</p>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[tx.status] || 'bg-green-100 text-green-700'}`}>
                     {tx.status}
                   </span>
