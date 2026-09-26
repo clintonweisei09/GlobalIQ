@@ -6,18 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const CONSUMER_KEY = Deno.env.get("MPESA_CONSUMER_KEY") ||
-  "EoLiYGTPvS8xW67JpWA86AiCasiIdRwFEapjHrBOFaf2d6WN";
-const CONSUMER_SECRET = Deno.env.get("MPESA_CONSUMER_SECRET") ||
-  "OqAVZDZe6MEZjawM6fkqfD3fuXxWuYA4uDwGKDaYJKdwVSuZO6alFavur3oayUAP";
-const PASSKEY = Deno.env.get("MPESA_PASSKEY") ||
-  "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
-const SHORTCODE = Deno.env.get("MPESA_SHORTCODE") || "174379";
+const CONSUMER_KEY = Deno.env.get("MPESA_CONSUMER_KEY");
+const CONSUMER_SECRET = Deno.env.get("MPESA_CONSUMER_SECRET");
+const PASSKEY = Deno.env.get("MPESA_PASSKEY");
+const BUSINESS_SHORTCODE = Deno.env.get("MPESA_BUSINESS_SHORTCODE") || Deno.env.get("MPESA_SHORTCODE");
+const TILL_NUMBER = Deno.env.get("MPESA_TILL_NUMBER") || "1712962";
 const CALLBACK_URL = Deno.env.get("MPESA_CALLBACK_URL") ||
-  "https://aoszjewborbuwfmhfaqg.supabase.co/functions/v1/mpesa-callback";
+  "https://rwxfcwooyrldqualtbpn.supabase.co/functions/v1/mpesa-callback";
 
-const AUTH_URL = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials";
-const STK_URL = "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest";
+const MPESA_ENV = Deno.env.get("MPESA_ENV") || "live";
+const MPESA_HOST = MPESA_ENV === "sandbox" ? "sandbox.safaricom.co.ke" : "api.safaricom.co.ke";
+const AUTH_URL = `https://${MPESA_HOST}/oauth/v1/generate?grant_type=client_credentials`;
+const STK_URL = `https://${MPESA_HOST}/mpesa/stkpush/v1/processrequest`;
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -58,13 +58,8 @@ function normalizePhone(phone: string): string {
   return p;
 }
 
-function generateTxCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "";
-  for (let i = 0; i < 10; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
+function getUnlockFeeForPayout(payoutAmount: number): number {
+  return Math.min(250, Math.max(100, 100 + Math.round(Math.min(150, Math.max(0, payoutAmount)))));
 }
 
 Deno.serve(async (req: Request) => {
@@ -95,6 +90,12 @@ Deno.serve(async (req: Request) => {
     }
     const userId = userData.user.id;
 
+    if (!CONSUMER_KEY || !CONSUMER_SECRET || !PASSKEY || !BUSINESS_SHORTCODE) {
+      return new Response(JSON.stringify({ error: "Safaricom M-Pesa is not configured. Add live Daraja credentials to the function secrets." }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("full_name")
@@ -103,97 +104,175 @@ Deno.serve(async (req: Request) => {
 
     const userName = profile?.full_name || userData.user.email || "User";
 
-    const { phone, amount, accountReference, transactionDesc } = await req.json();
-    if (!phone || !amount) {
-      return new Response(JSON.stringify({ error: "Phone and amount are required" }), {
+    const { taskId, phone, amount, accountReference, transactionDesc } = await req.json();
+    if (!taskId || !phone || amount === undefined || amount === null || amount === "") {
+      return new Response(JSON.stringify({ error: "Task, mobile number, and amount are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const stkPhone = normalizePhone(phone);
-    if (!/^2547\d{8}$/.test(stkPhone)) {
+    if (!/^254[17]\d{8}$/.test(stkPhone)) {
       return new Response(JSON.stringify({ error: "Invalid M-Pesa phone number. Use format 07XXXXXXXX." }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const kesAmount = Math.round(Number(amount));
-    const txCode = generateTxCode();
+    const { data: task, error: taskError } = await supabase
+      .from("tasks")
+      .select("payout_amount")
+      .eq("id", taskId)
+      .eq("status", "active")
+      .maybeSingle();
+    const kesAmount = task ? getUnlockFeeForPayout(Number(task.payout_amount)) : Number.NaN;
+    if (taskError || !task || !Number.isInteger(kesAmount) || kesAmount < 100 || kesAmount > 250) {
+      return new Response(JSON.stringify({ error: "Invalid or unavailable task" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (Number(amount) !== kesAmount) {
+      return new Response(JSON.stringify({ error: "The unlock amount does not match this task" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    // Attempt real Safaricom STK push (fire-and-forget for the phone prompt)
-    // but don't block on it — we complete the payment immediately below.
+    const { data: existingUnlock, error: unlockLookupError } = await supabase
+      .from("unlocked_tasks")
+      .select("id, mpesa_payments!inner(status)")
+      .eq("user_id", userId)
+      .eq("task_id", taskId)
+      .eq("mpesa_payments.status", "success")
+      .maybeSingle();
+    if (unlockLookupError) {
+      return new Response(JSON.stringify({ error: "Unable to verify this task's unlock status" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (existingUnlock) {
+      return new Response(JSON.stringify({ error: "This task is already unlocked" }), {
+        status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const pendingSince = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data: pendingPayment, error: pendingLookupError } = await supabase
+      .from("mpesa_payments")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("task_id", taskId)
+      .eq("status", "pending")
+      .gte("created_at", pendingSince)
+      .limit(1)
+      .maybeSingle();
+    if (pendingLookupError) {
+      return new Response(JSON.stringify({ error: "Unable to verify pending payments for this task" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (pendingPayment) {
+      return new Response(JSON.stringify({ error: "A payment prompt for this task is already awaiting confirmation. Check your phone or wait a few minutes before retrying." }), {
+        status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const paymentReference = accountReference || "EarnIQ Task Unlock";
+    const paymentDescription = transactionDesc || "EarnIQ Task Unlock";
+    const { data: paymentRow, error: paymentInsertError } = await supabase
+      .from("mpesa_payments")
+      .insert({
+        user_id: userId,
+        task_id: taskId,
+        phone: stkPhone,
+        amount: kesAmount,
+        account_reference: paymentReference,
+        transaction_desc: paymentDescription,
+        status: "pending",
+        result_desc: `Awaiting Safaricom response for Till ${TILL_NUMBER}`,
+      })
+      .select("id")
+      .single();
+    if (paymentInsertError || !paymentRow) {
+      return new Response(JSON.stringify({ error: "Unable to create a payment record. No M-Pesa prompt was sent." }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Start a real Safaricom STK push and wait for its checkout identifiers.
+    let stkAccepted = false;
     try {
       const accessToken = await getAccessToken();
       const timestamp = new Date()
         .toISOString()
         .replace(/[-:T]/g, "")
         .slice(0, 14);
-      const password = btoa(`${SHORTCODE}${PASSKEY}${timestamp}`);
+      const password = btoa(`${BUSINESS_SHORTCODE}${PASSKEY}${timestamp}`);
 
       const stkPayload = {
-        BusinessShortCode: SHORTCODE,
+        BusinessShortCode: BUSINESS_SHORTCODE,
         Password: password,
         Timestamp: timestamp,
-        TransactionType: "CustomerPayBillOnline",
+        TransactionType: "CustomerBuyGoodsOnline",
         Amount: kesAmount,
         PartyA: stkPhone,
-        PartyB: SHORTCODE,
+        PartyB: TILL_NUMBER,
         PhoneNumber: stkPhone,
         CallBackURL: CALLBACK_URL,
-        AccountReference: accountReference || "EarnIQ",
-        TransactionDesc: transactionDesc || "Account Activation",
+        AccountReference: paymentReference,
+        TransactionDesc: paymentDescription,
       };
 
-      fetchWithTimeout(STK_URL, {
+      const stkResponse = await fetchWithTimeout(STK_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(stkPayload),
-      }, 5000).catch(() => {});
-    } catch (_err) {
-      // Safaricom API unreachable — that's fine, we still complete the payment
-    }
+      }, 10000);
+      const stkResult = await stkResponse.json();
+      if (!stkResponse.ok || !stkResult.CheckoutRequestID) {
+        throw new Error(stkResult.errorMessage || stkResult.ResponseDescription || "Safaricom did not accept the STK request.");
+      }
+      stkAccepted = true;
 
-    // Insert a completed payment record immediately
-    const { data: paymentRow } = await supabase
-      .from("mpesa_payments")
-      .insert({
-        user_id: userId,
+      const { error: paymentUpdateError } = await supabase
+        .from("mpesa_payments")
+        .update({
+          checkout_request_id: stkResult.CheckoutRequestID,
+          merchant_request_id: stkResult.MerchantRequestID,
+          result_desc: `Safaricom Till ${TILL_NUMBER}`,
+        })
+        .eq("id", paymentRow.id);
+      if (paymentUpdateError) {
+        throw new Error("Safaricom accepted the prompt, but the payment could not be linked for confirmation. Contact support before retrying.");
+      }
+
+      return new Response(JSON.stringify({
+        paymentId: paymentRow.id,
+        checkoutRequestId: stkResult.CheckoutRequestID,
         phone: stkPhone,
+        tillNumber: TILL_NUMBER,
+        mode: MPESA_ENV,
+        status: "pending",
         amount: kesAmount,
-        account_reference: accountReference || "EarnIQ",
-        transaction_desc: transactionDesc || "Account Activation",
-        checkout_request_id: `SIM-${txCode}`,
-        merchant_request_id: `SIM-MR-${txCode}`,
-        mpesa_receipt_no: txCode,
-        status: "success",
-        result_code: 0,
-        result_desc: "The service request is processed successfully.",
-      })
-      .select("id")
-      .single();
-
-    // Activate the user's profile immediately
-    await supabase
-      .from("profiles")
-      .update({ is_activated: true, updated_at: new Date().toISOString() })
-      .eq("id", userId);
-
-    return new Response(JSON.stringify({
-      paymentId: paymentRow?.id,
-      phone: stkPhone,
-      mode: "test",
-      status: "success",
-      transactionCode: txCode,
-      amount: kesAmount,
-      userName,
-      paidAt: new Date().toISOString(),
-      customerMessage: "Payment processed successfully.",
-    }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+        userName,
+        customerMessage: `Check your phone to approve the EarnIQ payment to Till ${TILL_NUMBER}.`,
+      }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } catch (_err) {
+      const errorMessage = _err instanceof Error ? _err.message : "Unable to start Safaricom payment.";
+      if (!stkAccepted) {
+        await supabase
+          .from("mpesa_payments")
+          .update({ status: "failed", result_desc: errorMessage })
+          .eq("id", paymentRow.id)
+          .eq("status", "pending");
+      }
+      return new Response(JSON.stringify({ error: errorMessage }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
   } catch (err) {
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : "Server error" }),

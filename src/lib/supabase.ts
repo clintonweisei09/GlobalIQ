@@ -45,6 +45,7 @@ export type Task = {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   payout_amount: number;
   payout_currency: string;
+  unlock_fee: number;
   estimated_time_minutes: number;
   instructions?: string;
   requirements: Record<string, unknown>;

@@ -18,6 +18,9 @@ import {
   Wallet as WalletIcon,
   Users,
   Flame,
+  Target,
+  Gift,
+  ArrowUpRight,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -218,6 +221,33 @@ export default function DashboardHome() {
             <p className="text-sm text-secondary-500 dark:text-secondary-400">{stat.title}</p>
           </div>
         ))}
+      </div>
+
+      {/* Daily momentum strip */}
+      <div className="grid lg:grid-cols-[1.4fr_1fr_1fr] gap-4">
+        <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 rounded-2xl p-5 text-white relative overflow-hidden animate-[float_6s_ease-in-out_infinite]">
+          <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full border-[18px] border-white/10" />
+          <div className="relative flex items-start justify-between gap-4">
+            <div>
+              <p className="text-emerald-100 text-xs uppercase tracking-wider font-semibold">Today&apos;s goal</p>
+              <h2 className="text-xl font-bold mt-1">Complete 5 tasks</h2>
+              <p className="text-sm text-emerald-100 mt-1">Keep your momentum going.</p>
+            </div>
+            <Target className="w-8 h-8 text-emerald-100" />
+          </div>
+          <div className="relative mt-5">
+            <div className="flex justify-between text-xs text-emerald-100 mb-2"><span>{Math.min(recentTasks.filter(task => task.status === 'approved').length, 5)} of 5 completed</span><span>{Math.min(recentTasks.filter(task => task.status === 'approved').length * 20, 100)}%</span></div>
+            <div className="h-2 bg-black/20 rounded-full overflow-hidden"><div className="h-full bg-white rounded-full transition-all duration-700" style={{ width: `${Math.min(recentTasks.filter(task => task.status === 'approved').length * 20, 100)}%` }} /></div>
+          </div>
+        </div>
+        <Link to="/dashboard/tasks" className="bg-white dark:bg-secondary-800 border border-secondary-200 dark:border-secondary-700 rounded-2xl p-5 hover:-translate-y-1 hover:shadow-lg transition-all group">
+          <div className="flex items-center justify-between"><div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center"><Gift className="w-5 h-5 text-amber-600" /></div><ArrowUpRight className="w-4 h-4 text-secondary-400 group-hover:text-emerald-600 transition-colors" /></div>
+          <p className="text-xs text-secondary-500 mt-4">Daily challenge</p><h3 className="font-semibold text-secondary-900 dark:text-white mt-1">Find a quick win</h3><p className="text-sm text-secondary-500 mt-1">Explore tasks under 30 minutes.</p>
+        </Link>
+        <Link to="/dashboard/referrals" className="bg-white dark:bg-secondary-800 border border-secondary-200 dark:border-secondary-700 rounded-2xl p-5 hover:-translate-y-1 hover:shadow-lg transition-all group">
+          <div className="flex items-center justify-between"><div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center"><Users className="w-5 h-5 text-blue-600" /></div><ArrowUpRight className="w-4 h-4 text-secondary-400 group-hover:text-emerald-600 transition-colors" /></div>
+          <p className="text-xs text-secondary-500 mt-4">Community pulse</p><h3 className="font-semibold text-secondary-900 dark:text-white mt-1">Invite a teammate</h3><p className="text-sm text-secondary-500 mt-1">Earn rewards when they get started.</p>
+        </Link>
       </div>
 
       {/* Charts Row */}

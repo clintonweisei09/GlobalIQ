@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   Sparkles,
   Mail,
+  Smartphone,
   Lock,
   ArrowRight,
   AlertCircle,
@@ -16,11 +17,14 @@ import {
 export default function LoginPage() {
   const [email, setEmail] = useState('developer@gmail.com');
   const [password, setPassword] = useState('developer@123');
+  const [method, setMethod] = useState<'email' | 'phone'>('email');
+  const [loginMode, setLoginMode] = useState<'password' | 'code'>('password');
+  const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-  const { signIn, user } = useAuth();
+  const { signIn, sendVerificationCode, verifyVerificationCode, user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -33,6 +37,23 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    const contact = email;
+    if (loginMode === 'code') {
+      if (code.length < 6) {
+        setError('Enter the 6-digit verification code.');
+        setLoading(false);
+        return;
+      }
+      const { error: codeError } = await verifyVerificationCode(contact, code, method);
+      if (codeError) {
+        setError(codeError);
+        setLoading(false);
+        return;
+      }
+      navigate('/dashboard', { replace: true });
+      return;
+    }
 
     const { error: signInError } = await signIn(email, password);
 
@@ -75,24 +96,30 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-secondary-700 mb-2">
-                Email address
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label htmlFor="email" className="block text-sm font-medium text-secondary-700">
+                  {method === 'email' ? 'Email address' : 'Mobile number'}
+                </label>
+                <div className="flex gap-1 rounded-lg bg-secondary-100 p-1 text-xs">
+                  <button type="button" onClick={() => { setMethod('email'); setEmail(''); }} className={`px-2 py-1 rounded-md ${method === 'email' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>Email</button>
+                  <button type="button" onClick={() => { setMethod('phone'); setEmail(''); }} className={`px-2 py-1 rounded-md ${method === 'phone' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>SMS</button>
+                </div>
+              </div>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" />
+                {method === 'email' ? <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" /> : <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" />}
                 <input
                   id="email"
-                  type="email"
+                  type={method === 'email' ? 'email' : 'tel'}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white transition-all"
-                  placeholder="you@example.com"
+                  placeholder={method === 'email' ? 'you@example.com' : '0712345678'}
                   required
                 />
               </div>
             </div>
 
-            <div>
+            {loginMode === 'password' ? <div>
               <div className="flex items-center justify-between mb-2">
                 <label htmlFor="password" className="block text-sm font-medium text-secondary-700">
                   Password
@@ -120,7 +147,31 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
-            </div>
+            </div> : <div>
+              <label htmlFor="login-code" className="block text-sm font-medium text-secondary-700 mb-2">Verification code</label>
+              <input
+                id="login-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                inputMode="numeric"
+                placeholder="Enter 6-digit code"
+                className="w-full px-4 py-3 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white text-center tracking-[0.35em]"
+                required
+              />
+            </div>}
+
+            <button
+              type="button"
+              onClick={async () => {
+                setError('');
+                const result = await sendVerificationCode(email, method);
+                if (result.error) setError(result.error);
+                else { setLoginMode('code'); setCode(''); }
+              }}
+              className="w-full text-sm font-medium text-emerald-700 hover:text-emerald-800"
+            >
+              {loginMode === 'password' ? 'Sign in with a verification code' : 'Resend verification code'}
+            </button>
 
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -140,11 +191,11 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Signing in...
+                  {loginMode === 'code' ? 'Verifying...' : 'Signing in...'}
                 </>
               ) : (
                 <>
-                  Sign In <ArrowRight className="w-5 h-5" />
+                  {loginMode === 'code' ? 'Verify code' : 'Sign In'} <ArrowRight className="w-5 h-5" />
                 </>
               )}
             </button>

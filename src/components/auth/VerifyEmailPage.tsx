@@ -4,34 +4,76 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   Sparkles,
   Mail,
+  Smartphone,
   ArrowLeft,
   CheckCircle,
   Loader2,
   RefreshCw,
+  KeyRound,
 } from 'lucide-react';
 
 export default function VerifyEmailPage() {
   const [resending, setResending] = useState(false);
   const [resent, setResent] = useState(false);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [verified, setVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, sendVerificationCode, verifyVerificationCode } = useAuth();
 
-  const email = location.state?.email || user?.email;
+  const verificationMethod = location.state?.verificationMethod || (user?.phone ? 'phone' : 'email');
+  const contact = location.state?.contact || (verificationMethod === 'phone' ? user?.phone : user?.email);
+  const isPhone = verificationMethod === 'phone';
 
   useEffect(() => {
-    if (user?.email_confirmed_at) {
+    if (user?.email_confirmed_at || user?.phone_confirmed_at) {
       navigate('/dashboard');
     }
   }, [user, navigate]);
 
   const handleResend = async () => {
     setResending(true);
-    // In a real app, this would call Supabase to resend verification
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setResending(false);
-    setResent(true);
-    setTimeout(() => setResent(false), 3000);
+    setError('');
+    try {
+      const result = await sendVerificationCode(contact, isPhone ? 'phone' : 'email');
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setResent(true);
+      setTimeout(() => setResent(false), 3000);
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : 'Unable to send a verification code.');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleVerify = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!contact || code.length < 6) {
+      setError('Enter the verification code sent to you.');
+      return;
+    }
+
+    setVerifying(true);
+    setError('');
+    try {
+      const result = await verifyVerificationCode(contact, code, isPhone ? 'phone' : 'email');
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
+      setVerified(true);
+      setTimeout(() => navigate('/dashboard'), 800);
+    } catch (verificationError) {
+      setError(verificationError instanceof Error ? verificationError.message : 'Unable to verify this code.');
+    } finally {
+      setVerifying(false);
+    }
   };
 
   return (
@@ -50,22 +92,50 @@ export default function VerifyEmailPage() {
           </Link>
 
           <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Mail className="w-10 h-10 text-primary-600" />
+            {isPhone ? <Smartphone className="w-10 h-10 text-primary-600" /> : <Mail className="w-10 h-10 text-primary-600" />}
           </div>
 
-          <h1 className="text-2xl font-bold text-secondary-900 mb-2">Verify your email</h1>
+          <h1 className="text-2xl font-bold text-secondary-900 mb-2">Verify your {isPhone ? 'mobile number' : 'email'}</h1>
           <p className="text-secondary-600 mb-6">
-            We've sent a verification link to
+            We've sent a verification code to
             <br />
-            <strong className="text-secondary-900">{email}</strong>
+            <strong className="text-secondary-900">{contact}</strong>
           </p>
+
+          {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-left text-sm text-red-700">{error}</p>}
+
+          {verified ? (
+            <div className="mb-6 flex items-center justify-center gap-2 rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
+              <CheckCircle className="w-5 h-5" /> Verified. Opening your dashboard...
+            </div>
+          ) : (
+            <form onSubmit={handleVerify} className="mb-6 space-y-3">
+              <label htmlFor="verification-code" className="sr-only">Verification code</label>
+              <div className="relative">
+                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" />
+                <input
+                  id="verification-code"
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="Enter 6-digit code"
+                  className="w-full rounded-lg border border-secondary-200 py-3 pl-10 pr-4 text-center tracking-[0.35em]"
+                  required
+                />
+              </div>
+              <button type="submit" disabled={verifying} className="w-full rounded-lg bg-primary-600 px-4 py-3 font-medium text-white hover:bg-primary-700 disabled:opacity-50">
+                {verifying ? <><Loader2 className="mr-2 inline h-5 w-5 animate-spin" /> Verifying...</> : 'Verify code'}
+              </button>
+            </form>
+          )}
 
           <div className="bg-secondary-50 rounded-xl p-4 mb-6">
             <div className="flex items-start gap-3">
               <CheckCircle className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
               <div className="text-left text-sm text-secondary-600">
                 <p className="font-medium text-secondary-900 mb-1">Check your inbox</p>
-                <p>Click the link in the email to verify your account. The link expires in 24 hours.</p>
+                <p>Enter the code sent to you to verify your account. Codes expire shortly for your security.</p>
               </div>
             </div>
           </div>
@@ -84,12 +154,12 @@ export default function VerifyEmailPage() {
               ) : resent ? (
                 <>
                   <CheckCircle className="w-5 h-5 text-primary-600" />
-                  Email sent!
+                  Code sent!
                 </>
               ) : (
                 <>
                   <RefreshCw className="w-5 h-5" />
-                  Resend verification email
+                  Resend verification code
                 </>
               )}
             </button>

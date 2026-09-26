@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   Sparkles,
   Mail,
+  Smartphone,
   Lock,
   User,
   ArrowRight,
@@ -17,7 +18,8 @@ import {
 } from 'lucide-react';
 
 export default function SignUpPage() {
-  const [email, setEmail] = useState('');
+  const [contact, setContact] = useState('');
+  const [verificationMethod, setVerificationMethod] = useState<'email' | 'phone'>('email');
   const [password, setPassword] = useState('');
   const [userType, setUserType] = useState<'worker' | 'client'>('worker');
   const [error, setError] = useState('');
@@ -49,9 +51,14 @@ export default function SignUpPage() {
       return;
     }
 
+    if (verificationMethod === 'phone' && !/^\+?2547\d{8}$/.test(contact.replace(/[\s-]/g, '')) && !/^07\d{8}$/.test(contact.replace(/[\s-]/g, ''))) {
+      setError('Enter a valid Kenyan mobile number, for example 0712345678.');
+      return;
+    }
+
     setLoading(true);
 
-    const { error: signUpError } = await signUp(email, password, userType);
+    const { error: signUpError } = await signUp(contact, password, userType, verificationMethod);
 
     if (signUpError) {
       setError(signUpError);
@@ -63,7 +70,12 @@ export default function SignUpPage() {
     setLoading(false);
 
     setTimeout(() => {
-      navigate('/auth/verify-email', { state: { email } });
+      navigate('/auth/verify-email', {
+        state: {
+          contact: verificationMethod === 'phone' ? contact.replace(/[\s-]/g, '').replace(/^0/, '+254') : contact,
+          verificationMethod,
+        },
+      });
     }, 2000);
   };
 
@@ -142,21 +154,27 @@ export default function SignUpPage() {
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-secondary-700 mb-2">
-                Email address
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" />
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white transition-all"
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
+                <div className="flex items-center justify-between mb-2">
+                  <label htmlFor="contact" className="block text-sm font-medium text-secondary-700">
+                    {verificationMethod === 'email' ? 'Email address' : 'Mobile number'}
+                  </label>
+                  <div className="flex gap-1 rounded-lg bg-secondary-100 p-1 text-xs">
+                    <button type="button" onClick={() => { setVerificationMethod('email'); setContact(''); }} className={`px-2 py-1 rounded-md ${verificationMethod === 'email' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>Email</button>
+                    <button type="button" onClick={() => { setVerificationMethod('phone'); setContact(''); }} className={`px-2 py-1 rounded-md ${verificationMethod === 'phone' ? 'bg-white text-emerald-700 shadow-sm' : 'text-secondary-500'}`}>SMS</button>
+                  </div>
+                </div>
+                <div className="relative">
+                  {verificationMethod === 'email' ? <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" /> : <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-secondary-400" />}
+                  <input
+                    id="contact"
+                    type={verificationMethod === 'email' ? 'email' : 'tel'}
+                    value={contact}
+                    onChange={(e) => setContact(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-secondary-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white transition-all"
+                    placeholder={verificationMethod === 'email' ? 'you@example.com' : '0712345678'}
+                    required
+                  />
+                </div>
             </div>
 
             <div>

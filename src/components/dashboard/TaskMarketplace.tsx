@@ -29,11 +29,10 @@ import {
   Receipt,
   Calendar,
   User,
+  Building2,
   Hash,
   PartyPopper,
 } from 'lucide-react';
-
-const TASK_UNLOCK_FEE_KES = 1;
 
 const categoryMeta: Record<string, { icon: React.ReactElement; color: string; gradient: string }> = {
   'AI Training': { icon: <Brain className="w-5 h-5" />, color: 'text-purple-600', gradient: 'from-purple-500 to-indigo-600', bg: 'bg-purple-50 dark:bg-purple-900/20', border: 'border-purple-200 dark:border-purple-800' },
@@ -65,13 +64,11 @@ const countryFlags: Record<string, string> = {
   'Global': '🌍',
 };
 
-const posterLocations = [
-  'Canada', 'United States', 'United Kingdom', 'Germany', 'Australia',
-  'Netherlands', 'France', 'Singapore', 'Japan', 'South Korea', 'Kenya',
-];
+const getUnlockFeeForPayout = (payoutAmount: number) =>
+  Math.min(250, Math.max(100, 100 + Math.round(Math.min(150, Math.max(0, payoutAmount)))));
 
 export default function TaskMarketplace() {
-  const { profile } = useAuth();
+  const { profile, wallet } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -108,11 +105,18 @@ export default function TaskMarketplace() {
   });
   const [assignmentPosting, setAssignmentPosting] = useState(false);
   const [assignmentSuccess, setAssignmentSuccess] = useState(false);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const getUnlockFee = (task: Task) => getUnlockFeeForPayout(Number(task.payout_amount));
+
   useEffect(() => {
+    if (!profile?.id) {
+      setUnlockedTaskIds(new Set());
+      return;
+    }
     loadUnlockedTasks();
-  }, [profile]);
+  }, [profile?.id]);
 
   useEffect(() => {
     loadTasks();
@@ -122,11 +126,10 @@ export default function TaskMarketplace() {
     if (!profile?.id) return;
     const { data } = await supabase
       .from('unlocked_tasks')
-      .select('task_id')
+      .select('task_id, mpesa_payments!inner(status)')
       .eq('user_id', profile.id);
-    if (data) {
-      setUnlockedTaskIds(new Set(data.map((r: { task_id: string }) => r.task_id)));
-    }
+    const confirmedUnlocks = (data || []).filter((row: { mpesa_payments: { status: string } }) => row.mpesa_payments.status === 'success');
+    setUnlockedTaskIds(new Set(confirmedUnlocks.map((row: { task_id: string }) => row.task_id)));
   };
 
   const loadTasks = async () => {
@@ -181,6 +184,9 @@ export default function TaskMarketplace() {
 
     if (!unlockedTaskIds.has(taskId)) {
       setUnlockingTaskId(taskId);
+      setUnlockPhone(wallet?.mpesa_phone || '');
+      setUnlockError(null);
+      setUnlockStatus('idle');
       setShowUnlockModal(true);
       return;
     }
@@ -248,14 +254,6 @@ export default function TaskMarketplace() {
         stopPolling();
         setUnlockStatus('success');
 
-        // Insert unlocked_tasks record
-        await supabase.from('unlocked_tasks').insert({
-          user_id: profile?.id,
-          task_id: taskId,
-          unlock_fee: TASK_UNLOCK_FEE_KES,
-          mpesa_payment_id: id,
-        });
-
         setUnlockedTaskIds(prev => new Set(prev).add(taskId));
 
         const { data: profileData } = await supabase
@@ -289,7 +287,7 @@ export default function TaskMarketplace() {
       return;
     }
 
-    const phoneRegex = /^(07\d{8}|2547\d{8}|\+2547\d{8})$/;
+    const phoneRegex = /^(0[17]\d{8}|254[17]\d{8}|\+254[17]\d{8})$/;
     const cleanPhone = unlockPhone.replace(/\s/g, '');
     if (!phoneRegex.test(cleanPhone)) {
       setUnlockError('Please enter a valid Safaricom number (e.g., 0712345678).');
@@ -300,6 +298,13 @@ export default function TaskMarketplace() {
     setUnlockError(null);
 
     try {
+      const task = tasks.find(item => item.id === unlockingTaskId);
+      if (!task) {
+        setUnlockStatus('failed');
+        setUnlockError('This task is no longer available. Please refresh and try again.');
+        return;
+      }
+
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (!token) {
@@ -317,10 +322,11 @@ export default function TaskMarketplace() {
           apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({
+          taskId: task.id,
           phone: cleanPhone,
-          amount: TASK_UNLOCK_FEE_KES,
+          amount: getUnlockFee(task),
           accountReference: 'EarnIQ Task Unlock',
-          transactionDesc: 'Task Unlock Fee',
+          transactionDesc: 'EarnIQ Task Unlock',
         }),
       });
 
@@ -332,31 +338,13 @@ export default function TaskMarketplace() {
         return;
       }
 
-      // Test mode: payment is already successful
-      if (data.mode === 'test' && data.status === 'success') {
-        setUnlockStatus('success');
-
-        await supabase.from('unlocked_tasks').insert({
-          user_id: profile?.id,
-          task_id: unlockingTaskId,
-          unlock_fee: TASK_UNLOCK_FEE_KES,
-        });
-        setUnlockedTaskIds(prev => new Set(prev).add(unlockingTaskId!));
-
-        setUnlockReceipt({
-          transactionCode: data.transactionCode,
-          amount: data.amount,
-          userName: data.userName,
-          phone: data.phone,
-          paidAt: data.paidAt,
-        });
+      // Poll until Safaricom confirms or rejects the Till payment.
+      if (!data.paymentId || !unlockingTaskId) {
+        setUnlockStatus('failed');
+        setUnlockError('The payment request could not be tracked. Please try again.');
         return;
       }
-
-      // Live mode: poll for callback result
-      if (data.paymentId && unlockingTaskId) {
-        pollUnlockPayment(data.paymentId, unlockingTaskId);
-      }
+      pollUnlockPayment(data.paymentId, unlockingTaskId);
     } catch {
       setUnlockStatus('failed');
       setUnlockError('Unable to reach the payment service. Please try again.');
@@ -364,6 +352,12 @@ export default function TaskMarketplace() {
   };
 
   const categories = Object.keys(categoryMeta);
+  const unlockingTask = tasks.find(task => task.id === unlockingTaskId);
+  const unlockFee = unlockingTask ? getUnlockFee(unlockingTask) : 100;
+  const assignmentPayoutAmount = Number(assignmentForm.payout);
+  const assignmentUnlockFee = Number.isFinite(assignmentPayoutAmount) && assignmentPayoutAmount > 0
+    ? getUnlockFeeForPayout(assignmentPayoutAmount)
+    : 100;
 
   const budgetOptions = [
     { label: 'All Budgets', value: null },
@@ -382,11 +376,12 @@ export default function TaskMarketplace() {
   const getPosterInfo = (task: Task) => {
     const posterName = task.poster_name || 'EarnIQ Team';
     const location = task.poster_location || 'Global';
-    return { name: posterName, location };
+    const avatarUrl = task.poster_avatar_url || `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(posterName)}&backgroundColor=0f766e,2563eb,f59e0b`;
+    return { name: posterName, location, avatarUrl };
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
       {/* Success Message */}
       {applySuccess && (
         <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 flex items-center gap-3 animate-fade-in">
@@ -399,30 +394,34 @@ export default function TaskMarketplace() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-emerald-950 via-teal-900 to-blue-950 bg-[length:200%_200%] p-6 text-white shadow-xl animate-gradient-shift md:p-8">
+        <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-cyan-400/20 blur-3xl animate-pulse-slow" />
+        <div className="absolute -bottom-24 left-1/3 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl animate-float" />
+        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold mb-1">
-            <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 bg-clip-text text-transparent">Task Marketplace</span>
+            <span className="bg-gradient-to-r from-emerald-200 via-cyan-200 to-blue-200 bg-clip-text text-transparent">Task Marketplace</span>
           </h1>
-          <p className="text-secondary-600 dark:text-secondary-400">Find tasks that match your skills and earn money</p>
+          <p className="text-emerald-100">Find tasks that match your skills and earn money</p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowAssignmentModal(true)}
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white px-4 py-2.5 rounded-xl font-semibold text-sm hover:from-emerald-600 hover:to-teal-700 transition-all shadow-lg shadow-emerald-500/20 hover:scale-[1.02] flex items-center gap-2"
+            className="bg-white/95 text-emerald-800 px-4 py-2.5 rounded-xl font-semibold text-sm hover:bg-white transition-all shadow-lg shadow-black/20 hover:scale-[1.02] flex items-center gap-2"
           >
             <FileText className="w-4 h-4" />
             Post Assignment
           </button>
-          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl border border-blue-200 dark:border-blue-800 px-4 py-2">
-            <p className="text-xs text-blue-600 dark:text-blue-400">Available Tasks</p>
-            <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{taskStats.total}</p>
+          <div className="bg-white/10 rounded-xl border border-white/15 px-4 py-2 backdrop-blur-sm">
+            <p className="text-xs text-cyan-100">Available Tasks</p>
+            <p className="text-xl font-bold text-white">{taskStats.total}</p>
           </div>
-          <div className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 px-4 py-2">
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">Total Value</p>
-            <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300">${taskStats.totalValue.toFixed(0)}</p>
+          <div className="bg-white/10 rounded-xl border border-white/15 px-4 py-2 backdrop-blur-sm">
+            <p className="text-xs text-emerald-100">Total Value</p>
+            <p className="text-xl font-bold text-white">${taskStats.totalValue.toFixed(0)}</p>
           </div>
         </div>
+      </div>
       </div>
 
       {/* Info Banner */}
@@ -431,7 +430,7 @@ export default function TaskMarketplace() {
         <div>
           <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Each task is locked individually</p>
           <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-            Pay a small fee of KES {TASK_UNLOCK_FEE_KES.toLocaleString()} per task via M-Pesa to unlock it. Other tasks stay locked until you unlock them separately.
+            Unlock fees vary with each task's payout from KES 100 to KES 250. Higher-paying tasks have higher fees, and unlocking one task leaves the rest locked.
           </p>
         </div>
       </div>
@@ -607,7 +606,7 @@ export default function TaskMarketplace() {
                 return (
                   <div
                     key={task.id}
-                    className="bg-white dark:bg-secondary-800 rounded-xl border border-secondary-200 dark:border-secondary-700 p-5 hover:shadow-lg hover:border-primary-300 dark:hover:border-primary-600 transition-all cursor-pointer"
+                    className="group bg-white dark:bg-secondary-800 rounded-2xl border border-secondary-200 dark:border-secondary-700 p-5 hover:-translate-y-1 hover:shadow-2xl hover:border-primary-300 dark:hover:border-primary-600 transition-all duration-300 cursor-pointer animate-slide-up"
                     onClick={() => {
                       setSelectedTask(task);
                       setApplyError(null);
@@ -632,7 +631,17 @@ export default function TaskMarketplace() {
 
                     {/* Poster Info */}
                     <div className="flex items-center gap-2 mb-4 text-xs text-secondary-500 dark:text-secondary-400">
+                      <span className="relative w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-cyan-600 to-emerald-600 flex items-center justify-center text-white shadow-sm">
+                        <User className="w-4 h-4" />
+                        <img
+                          src={poster.avatarUrl}
+                          alt={`${poster.name} avatar`}
+                          onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                          className="absolute inset-0 w-full h-full rounded-full object-cover ring-2 ring-white dark:ring-secondary-800 transition-transform duration-300 group-hover:scale-110"
+                        />
+                      </span>
                       <span className="font-medium text-secondary-700 dark:text-secondary-300">{poster.name}</span>
+                      <Building2 className="w-3.5 h-3.5 text-secondary-400" aria-label="Task poster" />
                       <span className="flex items-center gap-1 text-primary-600 dark:text-primary-400">
                         <MapPin className="w-3 h-3" />
                         {countryFlags[poster.location] || '🌍'} {poster.location}
@@ -679,10 +688,14 @@ export default function TaskMarketplace() {
                             setUnlockError(null);
                             setUnlockPhone('');
                           }}
-                          className="bg-gradient-to-r from-amber-400 to-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:from-amber-500 hover:to-orange-600 transition-all shadow-md flex items-center gap-2"
+                          aria-label={`Unlock task for KES ${getUnlockFee(task).toLocaleString()}`}
+                          className="min-w-[112px] min-h-[56px] px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors shadow-md flex flex-col items-center justify-center gap-0.5"
                         >
-                          <Lock className="w-4 h-4" />
-                          Unlock (KES {TASK_UNLOCK_FEE_KES.toLocaleString()})
+                          <span className="flex items-center gap-1.5">
+                            <Lock className="w-4 h-4" />
+                            <span>Unlock</span>
+                          </span>
+                          <span className="text-xs font-medium">KES {getUnlockFee(task).toLocaleString()}</span>
                         </button>
                       )}
                     </div>
@@ -741,7 +754,7 @@ export default function TaskMarketplace() {
               <p className="text-primary-100 text-sm">
                 {unlockStatus === 'success'
                   ? 'You can now apply for this task'
-                  : `Fee: KES ${TASK_UNLOCK_FEE_KES.toLocaleString()} via M-Pesa`}
+                  : `Fee: KES ${unlockFee.toLocaleString()} via Safaricom Till 1712962`}
               </p>
             </div>
 
@@ -834,7 +847,7 @@ export default function TaskMarketplace() {
                           Check your phone
                         </p>
                         <p className="text-xs text-green-700 dark:text-green-400 mt-0.5">
-                          Enter your M-Pesa PIN on your phone to complete the payment of KES {TASK_UNLOCK_FEE_KES.toLocaleString()}.
+                          Enter your M-Pesa PIN on your phone to pay EarnIQ KES {unlockFee.toLocaleString()} via Till 1712962.
                         </p>
                       </div>
                     </div>
@@ -866,11 +879,11 @@ export default function TaskMarketplace() {
                   <div className="bg-secondary-50 dark:bg-secondary-700/50 rounded-lg p-4 mb-6">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-secondary-600 dark:text-secondary-400">Unlock Fee</span>
-                      <span className="font-bold text-secondary-900 dark:text-white">KES {TASK_UNLOCK_FEE_KES.toLocaleString()}</span>
+                      <span className="font-bold text-secondary-900 dark:text-white">KES {unlockFee.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-secondary-500 dark:text-secondary-400">
                       <ShieldCheck className="w-4 h-4" />
-                      Secured by Safaricom M-Pesa
+                      Safaricom M-Pesa · Till 1712962 · EarnIQ
                     </div>
                   </div>
 
@@ -970,11 +983,20 @@ export default function TaskMarketplace() {
 
               {/* Poster Info */}
               <div className="flex items-center gap-3 p-3 bg-secondary-50 dark:bg-secondary-700/50 rounded-lg">
-                <div className="w-10 h-10 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full flex items-center justify-center text-white font-semibold">
-                  {getPosterInfo(selectedTask).name.charAt(0)}
-                </div>
+                <span className="relative w-10 h-10 flex-shrink-0 rounded-full bg-gradient-to-br from-cyan-600 to-emerald-600 flex items-center justify-center text-white shadow-sm">
+                  <User className="w-5 h-5" />
+                  <img
+                    src={getPosterInfo(selectedTask).avatarUrl}
+                    alt={`${getPosterInfo(selectedTask).name} avatar`}
+                    onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                    className="absolute inset-0 w-full h-full rounded-full object-cover ring-2 ring-white dark:ring-secondary-700"
+                  />
+                </span>
                 <div>
-                  <p className="font-medium text-secondary-900 dark:text-white">{getPosterInfo(selectedTask).name}</p>
+                  <p className="font-medium text-secondary-900 dark:text-white flex items-center gap-1.5">
+                    {getPosterInfo(selectedTask).name}
+                    <Building2 className="w-4 h-4 text-secondary-400" aria-label="Task poster" />
+                  </p>
                   <p className="text-sm text-secondary-500 dark:text-secondary-400 flex items-center gap-1">
                     <MapPin className="w-3 h-3" />
                     {countryFlags[getPosterInfo(selectedTask).location] || '🌍'} {getPosterInfo(selectedTask).location}
@@ -1125,6 +1147,11 @@ export default function TaskMarketplace() {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {assignmentError && (
+                    <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                      {assignmentError}
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1.5">Assignment Title</label>
                     <input
@@ -1164,6 +1191,13 @@ export default function TaskMarketplace() {
                       </select>
                     </div>
                     <div>
+                      <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1.5">Estimated Unlock Fee (KES)</label>
+                      <output className="block w-full px-4 py-2.5 border border-secondary-200 dark:border-secondary-600 rounded-lg bg-secondary-50 dark:bg-secondary-700 text-secondary-900 dark:text-white font-semibold">
+                        {assignmentForm.payout ? `KES ${assignmentUnlockFee.toLocaleString()}` : 'Enter a payout to calculate'}
+                      </output>
+                      <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">Higher-paying tasks have higher fees, capped at KES 250.</p>
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1.5">Payout (USD)</label>
                       <input
                         type="number"
@@ -1199,31 +1233,42 @@ export default function TaskMarketplace() {
 
                   <button
                     onClick={async () => {
-                      if (!assignmentForm.title || !assignmentForm.description || !assignmentForm.payout) return;
+                      const payoutAmount = Number(assignmentForm.payout);
+                      const unlockFee = getUnlockFeeForPayout(payoutAmount);
+                      if (!assignmentForm.title || !assignmentForm.description || !Number.isFinite(payoutAmount) || payoutAmount <= 0) return;
                       setAssignmentPosting(true);
-                      const deadlineDate = assignmentForm.deadline ? new Date(assignmentForm.deadline) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-                      const { error } = await supabase.from('tasks').insert({
-                        title: assignmentForm.title,
-                        description: assignmentForm.description,
-                        category: assignmentForm.category,
-                        task_type: assignmentForm.category === 'Translation' ? 'translation' : 'annotation',
-                        difficulty: 'intermediate',
-                        payout_amount: parseFloat(assignmentForm.payout),
-                        payout_currency: 'USD',
-                        estimated_time_minutes: 120,
-                        skills_required: assignmentForm.requirements ? assignmentForm.requirements.split(',').map((s: string) => s.trim()) : ['Writing'],
-                        status: 'active',
-                        total_slots: 1,
-                        slots_filled: 0,
-                        quality_threshold: 0.8,
-                        poster_name: profile?.full_name || 'Student',
-                        poster_location: profile?.country || profile?.city || 'Global',
-                        created_by: profile?.id,
-                      });
-                      setAssignmentPosting(false);
-                      if (!error) {
+                      setAssignmentError(null);
+                      try {
+                        const { error } = await supabase.from('tasks').insert({
+                          title: assignmentForm.title.trim(),
+                          description: assignmentForm.description.trim(),
+                          category: assignmentForm.category,
+                          task_type: assignmentForm.category === 'Translation' ? 'translation' : 'annotation',
+                          difficulty: 'intermediate',
+                          payout_amount: payoutAmount,
+                          payout_currency: 'USD',
+                          unlock_fee: unlockFee,
+                          estimated_time_minutes: 120,
+                          skills_required: assignmentForm.requirements ? assignmentForm.requirements.split(',').map((s: string) => s.trim()) : ['Writing'],
+                          status: 'active',
+                          total_slots: 1,
+                          slots_filled: 0,
+                          quality_threshold: 0.8,
+                          poster_name: profile?.full_name || 'Student',
+                          poster_location: profile?.country || profile?.city || 'Global',
+                          poster_avatar_url: profile?.avatar_url || null,
+                          created_by: profile?.id,
+                        });
+                        if (error) {
+                          setAssignmentError(`Unable to post assignment: ${error.message}`);
+                          return;
+                        }
                         setAssignmentSuccess(true);
-                        loadTasks();
+                        await loadTasks();
+                      } catch (error) {
+                        setAssignmentError(error instanceof Error ? error.message : 'Unable to post assignment. Please try again.');
+                      } finally {
+                        setAssignmentPosting(false);
                       }
                     }}
                     disabled={!assignmentForm.title || !assignmentForm.description || !assignmentForm.payout || assignmentPosting}

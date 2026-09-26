@@ -23,6 +23,8 @@ import {
   Award,
   Globe,
   ChevronDown,
+  Building2,
+  DollarSign,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -38,21 +40,35 @@ import { Link } from 'react-router-dom';
 import { CURRENCIES, formatCurrency as formatInCurrency, currencyFromCountry, type CurrencyCode } from '../../lib/currency';
 
 const KES_RATE = 150;
+type WalletTransaction = {
+  id: string;
+  status: string;
+  earnings: number | null;
+  created_at: string;
+  task?: { title?: string; payout_amount?: number } | null;
+};
 
 export default function Wallet() {
   const { profile, wallet, refreshWallet } = useAuth();
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawPhone, setWithdrawPhone] = useState('');
+  const [withdrawMethod, setWithdrawMethod] = useState<'mpesa' | 'bank'>('mpesa');
+  const [bankName, setBankName] = useState('');
+  const [bankAccountName, setBankAccountName] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankBranchCode, setBankBranchCode] = useState('');
   const [withdrawStage, setWithdrawStage] = useState<'idle' | 'initiating' | 'waiting' | 'success' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [successInfo, setSuccessInfo] = useState<{ kes: number; phone: string } | null>(null);
+  const [successInfo, setSuccessInfo] = useState<{ kes: number; recipient: string } | null>(null);
   const [showBalance, setShowBalance] = useState(true);
   const [currency, setCurrency] = useState<CurrencyCode>('USD');
   const [showCurrencyMenu, setShowCurrencyMenu] = useState(false);
+  const [withdrawDestination, setWithdrawDestination] = useState<'phone' | 'till'>('phone');
+  const [withdrawTillNumber, setWithdrawTillNumber] = useState('1712962');
   const currencyMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -123,7 +139,7 @@ export default function Wallet() {
   };
 
   const handleWithdraw = async () => {
-    if (!profile?.id || !withdrawPhone || !withdrawAmount) return;
+    if (!profile?.id || !withdrawAmount) return;
 
     const amount = parseFloat(withdrawAmount);
     if (isNaN(amount) || amount < 1 || amount > withdrawableBalance) {
@@ -131,10 +147,20 @@ export default function Wallet() {
       return;
     }
 
-    const phoneRegex = /^(07\d{8}|2547\d{8}|\+2547\d{8})$/;
     const cleanPhone = withdrawPhone.replace(/\s/g, '');
-    if (!phoneRegex.test(cleanPhone)) {
-      setError('Please enter a valid M-Pesa phone number (e.g., 0712345678)');
+    const cleanTillNumber = withdrawTillNumber.replace(/\s/g, '');
+    if (withdrawMethod === 'mpesa' && withdrawDestination === 'phone') {
+      const phoneRegex = /^(07\d{8}|2547\d{8}|\+2547\d{8})$/;
+      if (!phoneRegex.test(cleanPhone)) {
+        setError('Please enter a valid M-Pesa phone number (e.g., 0712345678)');
+        return;
+      }
+    } else if (withdrawMethod === 'mpesa' && !/^\d{5,7}$/.test(cleanTillNumber)) {
+      setError('Please enter a valid M-Pesa till number.');
+      return;
+    }
+    if (withdrawMethod === 'bank' && (!bankName || !bankAccountName || !bankAccountNumber || !bankBranchCode)) {
+      setError('Complete all bank details before requesting a transfer.');
       return;
     }
 
@@ -150,7 +176,7 @@ export default function Wallet() {
         return;
       }
 
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mpesa-b2c-withdrawal`;
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${withdrawMethod === 'mpesa' ? 'mpesa-b2c-withdrawal' : 'bank-transfer-request'}`;
       const resp = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -158,7 +184,16 @@ export default function Wallet() {
           'Content-Type': 'application/json',
           apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
-        body: JSON.stringify({ phone: cleanPhone, amountUSD: amount }),
+        body: JSON.stringify({
+          phone: withdrawMethod === 'mpesa' && withdrawDestination === 'phone' ? cleanPhone : undefined,
+          destinationType: withdrawMethod === 'mpesa' ? withdrawDestination : undefined,
+          tillNumber: withdrawMethod === 'mpesa' && withdrawDestination === 'till' ? cleanTillNumber : undefined,
+          amountUSD: amount,
+          bankName,
+          bankAccountName,
+          bankAccountNumber,
+          bankBranchCode,
+        }),
       });
 
       const data = await resp.json();
@@ -169,10 +204,16 @@ export default function Wallet() {
         return;
       }
 
+      if (withdrawMethod === 'bank' && data.status === 'pending') {
+        setWithdrawStage('idle');
+        setError('Bank transfer request received. It will remain pending until a bank payout provider processes it.');
+        return;
+      }
+
       // Test mode: withdrawal is already completed
       if (data.mode === 'test' && data.status === 'completed') {
         setWithdrawStage('success');
-        setSuccessInfo({ kes: data.kesAmount, phone: data.phone });
+        setSuccessInfo({ kes: data.kesAmount, recipient: data.recipient || data.phone || data.tillNumber });
         await refreshWallet();
         loadData();
         return;
@@ -204,7 +245,10 @@ export default function Wallet() {
       if (data.status === 'completed') {
         clearInterval(interval);
         setWithdrawStage('success');
-        setSuccessInfo({ kes: parseFloat(withdrawAmount) * KES_RATE, phone: withdrawPhone });
+        setSuccessInfo({
+          kes: parseFloat(withdrawAmount) * KES_RATE,
+          recipient: withdrawDestination === 'phone' ? withdrawPhone : withdrawTillNumber,
+        });
         await refreshWallet();
         loadData();
       } else if (data.status === 'failed') {
@@ -257,6 +301,13 @@ export default function Wallet() {
         <button
           onClick={() => {
             setWithdrawPhone(wallet?.mpesa_phone || '');
+            setWithdrawMethod('mpesa');
+            setWithdrawDestination('phone');
+            setWithdrawTillNumber('1712962');
+            setBankName('');
+            setBankAccountName('');
+            setBankAccountNumber('');
+            setBankBranchCode('');
             setWithdrawAmount('');
             setWithdrawStage('idle');
             setError(null);
@@ -562,9 +613,9 @@ export default function Wallet() {
       {/* Withdraw Modal */}
       {showWithdrawModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-secondary-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl animate-fade-in">
+          <div className="bg-white dark:bg-secondary-800 rounded-2xl max-w-sm w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
             {/* Modal Header */}
-            <div className="bg-gradient-to-br from-green-600 to-emerald-700 p-6 text-white relative">
+            <div className="bg-gradient-to-br from-green-600 to-emerald-700 p-5 text-white relative">
               <button
                 onClick={() => {
                   setShowWithdrawModal(false);
@@ -578,7 +629,7 @@ export default function Wallet() {
               >
                 <X className="w-5 h-5" />
               </button>
-              <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mb-4 backdrop-blur-sm">
+              <div className="w-11 h-11 bg-white/15 rounded-xl flex items-center justify-center mb-3 backdrop-blur-sm">
                 {withdrawStage === 'success' ? (
                   <PartyPopper className="w-7 h-7" />
                 ) : withdrawStage === 'failed' ? (
@@ -592,15 +643,15 @@ export default function Wallet() {
                  withdrawStage === 'failed' ? 'Withdrawal Failed' :
                  withdrawStage === 'waiting' ? 'Processing...' :
                  withdrawStage === 'initiating' ? 'Initiating...' :
-                 'Withdraw to M-Pesa'}
+                 withdrawMethod === 'bank' ? 'Bank Transfer Request' : 'Withdraw to M-Pesa'}
               </h2>
               <p className="text-green-100 text-sm">
                 {withdrawStage === 'success' ? 'Funds sent to your M-Pesa account' :
-                 'Real-time transfer via Safaricom B2C'}
+                 withdrawMethod === 'bank' ? 'Secure payout request for review' : 'Real-time transfer via Safaricom B2C'}
               </p>
             </div>
 
-            <div className="p-6">
+            <div className="p-5">
               {/* Success State */}
               {withdrawStage === 'success' && successInfo ? (
                 <div className="text-center py-4">
@@ -611,7 +662,7 @@ export default function Wallet() {
                     {formatKES(parseFloat(withdrawAmount))}
                   </p>
                   <p className="text-sm text-secondary-500 dark:text-secondary-400 mb-4">
-                    sent to {successInfo.phone}
+                    sent to {successInfo.recipient}
                   </p>
                   <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 text-left">
                     <div className="flex items-start gap-2">
@@ -648,21 +699,46 @@ export default function Wallet() {
                       <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5 animate-spin" />
                       <div>
                         <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
-                          Sending {formatKES(parseFloat(withdrawAmount))} to {withdrawPhone}
+                          Sending {formatKES(parseFloat(withdrawAmount))} to {withdrawDestination === 'phone' ? withdrawPhone : withdrawTillNumber}
                         </p>
                         <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
-                          This usually takes 10-30 seconds. You'll receive an M-Pesa message on your phone.
+                          This usually takes 10-30 seconds. Safaricom will confirm the transaction when it completes.
                         </p>
                       </div>
                     </div>
                   )}
 
                   <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-2xl p-4 mb-5">
-                    <p className="text-sm text-green-700 dark:text-green-400 mb-1">Available Balance</p>
-                    <p className="text-2xl font-bold text-green-700 dark:text-green-300">{formatCurrency(availableBalance)}</p>
+                    <p className="text-sm text-green-700 dark:text-green-400 mb-1">Withdrawable Balance</p>
+                    <p className="text-2xl font-bold text-green-700 dark:text-green-300">{formatCurrency(withdrawableBalance)}</p>
+                    {isLocked && <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">{formatCurrency(lockedEarnings)} remains locked for {hoursRemaining}h.</p>}
                   </div>
 
-                  <div className="mb-4">
+                  {withdrawMethod === 'mpesa' && (
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      <button type="button" onClick={() => setWithdrawDestination('phone')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'phone' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>
+                        Phone number
+                      </button>
+                      <button type="button" onClick={() => setWithdrawDestination('till')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'till' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>
+                        Till number
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <button type="button" onClick={() => setWithdrawMethod('mpesa')} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawMethod === 'mpesa' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>
+                      <Phone className="w-4 h-4" /> M-Pesa
+                    </button>
+                    <button type="button" onClick={() => setWithdrawMethod('bank')} className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawMethod === 'bank' ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>
+                      <Building2 className="w-4 h-4" /> Bank transfer
+                    </button>
+                  </div>
+
+                  <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+                    M-Pesa payouts are sent through Safaricom and remain pending until the provider confirms the transaction.
+                  </p>
+
+                  {withdrawMethod === 'mpesa' && withdrawDestination === 'phone' ? <div className="mb-4">
                     <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
                       M-Pesa Phone Number
                     </label>
@@ -677,7 +753,26 @@ export default function Wallet() {
                         className="w-full pl-10 pr-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white disabled:opacity-60"
                       />
                     </div>
-                  </div>
+                  </div> : withdrawMethod === 'mpesa' ? <div className="mb-4">
+                    <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
+                      M-Pesa Till Number
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={withdrawTillNumber}
+                      onChange={(e) => { setWithdrawTillNumber(e.target.value); setError(null); }}
+                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting'}
+                      placeholder="1712962"
+                      className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white disabled:opacity-60"
+                    />
+                  </div> : <div className="space-y-3 mb-4">
+                    <p className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">Bank transfer requests are sent for review and require a configured payout provider before funds can be released.</p>
+                    <input type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Bank name" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                    <input type="text" value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} placeholder="Account holder name" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                    <input type="text" value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} placeholder="Account number" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                    <input type="text" value={bankBranchCode} onChange={(e) => setBankBranchCode(e.target.value)} placeholder="Branch / SWIFT code" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white" />
+                  </div>}
 
                   <div className="mb-4">
                     <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
@@ -720,7 +815,7 @@ export default function Wallet() {
 
                   <div className="flex items-center gap-2 text-xs text-secondary-500 dark:text-secondary-400 mb-5">
                     <ShieldCheck className="w-4 h-4 text-green-600 dark:text-green-400" />
-                    Secured by Safaricom M-Pesa B2C API
+                    {withdrawMethod === 'mpesa' ? `Secured by Safaricom M-Pesa ${withdrawDestination === 'phone' ? 'B2C' : 'B2B'} API` : 'Bank details are encrypted and reviewed before payout'}
                   </div>
 
                   <div className="flex gap-3">
@@ -731,6 +826,10 @@ export default function Wallet() {
                         setError(null);
                         setWithdrawAmount('');
                         setWithdrawPhone('');
+                        setBankName('');
+                        setBankAccountName('');
+                        setBankAccountNumber('');
+                        setBankBranchCode('');
                       }}
                       disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting'}
                       className="flex-1 py-3 rounded-xl font-medium text-secondary-600 dark:text-secondary-400 bg-secondary-100 dark:bg-secondary-700 hover:bg-secondary-200 dark:hover:bg-secondary-600 transition-colors disabled:opacity-50"
@@ -739,7 +838,7 @@ export default function Wallet() {
                     </button>
                     <button
                       onClick={handleWithdraw}
-                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting' || !withdrawPhone || !withdrawAmount || parseFloat(withdrawAmount) < 1}
+                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting' || (withdrawMethod === 'mpesa' ? (withdrawDestination === 'phone' ? !withdrawPhone : !withdrawTillNumber) : (!bankName || !bankAccountName || !bankAccountNumber || !bankBranchCode)) || !withdrawAmount || parseFloat(withdrawAmount) < 1}
                       className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
                     >
                       {withdrawStage === 'initiating' || withdrawStage === 'waiting' ? (
@@ -750,7 +849,7 @@ export default function Wallet() {
                       ) : (
                         <>
                           <ArrowUpRight className="w-5 h-5" />
-                          Withdraw Now
+                          {withdrawMethod === 'mpesa' ? 'Withdraw to M-Pesa' : 'Request bank transfer'}
                         </>
                       )}
                     </button>

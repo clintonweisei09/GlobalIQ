@@ -16,8 +16,10 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  signUp: (email: string, password: string, userType: 'worker' | 'client') => Promise<{ error: string | null }>;
+  signUp: (contact: string, password: string, userType: 'worker' | 'client', verificationMethod: 'email' | 'phone') => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  sendVerificationCode: (contact: string, method: 'email' | 'phone') => Promise<{ error: string | null }>;
+  verifyVerificationCode: (contact: string, code: string, method: 'email' | 'phone') => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (password: string) => Promise<{ error: string | null }>;
@@ -156,36 +158,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signUp = async (email: string, password: string, userType: 'worker' | 'client') => {
+  const signUp = async (contact: string, password: string, userType: 'worker' | 'client', verificationMethod: 'email' | 'phone') => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
 
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-          data: {
-            user_type: userType,
-          },
-        },
-      });
+      const normalizedPhone = contact.replace(/[\s-]/g, '').replace(/^0/, '+254');
+      const authRequest = verificationMethod === 'email'
+        ? supabase.auth.signUp({
+            email: contact,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/auth/callback`,
+              data: { user_type: userType },
+            },
+          })
+        : supabase.auth.signUp({
+            phone: normalizedPhone,
+            password,
+            options: { data: { user_type: userType } },
+          });
+
+      const result = await Promise.race([
+        authRequest,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('The verification service timed out. Please try again.')), 15000)),
+      ]);
+      const { data, error } = result;
 
       if (error) {
-        setState(prev => ({ ...prev, loading: false, error: error.message }));
-        return { error: error.message };
+        const message = verificationMethod === 'phone' && /provider|phone/i.test(error.message)
+          ? 'SMS verification is not enabled for this Supabase project. Enable a phone provider in Supabase Auth, then try again.'
+          : error.message;
+        setState(prev => ({ ...prev, loading: false, error: message }));
+        return { error: message };
       }
 
-      if (data.user) {
-        const referralCode = new URLSearchParams(window.location.search).get('ref');
-        await supabase.from('profiles').insert({
-          id: data.user.id,
-          email: data.user.email!,
-          user_type: userType,
-          referred_by: referralCode || null,
-        });
+      if (!data.user) {
+        const message = 'We could not create your account. Please try again.';
+        setState(prev => ({ ...prev, loading: false, error: message }));
+        return { error: message };
+      }
 
-        await createWallet(data.user.id);
+      if (data.user.identities && data.user.identities.length === 0) {
+        const message = 'An account with this contact already exists. Please sign in or use another one.';
+        setState(prev => ({ ...prev, loading: false, error: message }));
+        return { error: message };
+      }
+
+      const codeResult = await sendVerificationCode(contact, verificationMethod);
+      if (codeResult.error) {
+        setState(prev => ({ ...prev, loading: false, error: codeResult.error }));
+        return codeResult;
       }
 
       setState(prev => ({ ...prev, loading: false }));
@@ -194,6 +216,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const message = err instanceof Error ? err.message : 'An error occurred during sign up';
       setState(prev => ({ ...prev, loading: false, error: message }));
       return { error: message };
+    }
+  };
+
+  const normalizePhone = (contact: string) => contact.replace(/[\s-]/g, '').replace(/^0/, '+254');
+
+  const sendVerificationCode = async (contact: string, method: 'email' | 'phone') => {
+    try {
+      const result = method === 'phone'
+        ? await supabase.auth.signInWithOtp({ phone: normalizePhone(contact), options: { shouldCreateUser: false } })
+        : await supabase.auth.signInWithOtp({ email: contact, options: { shouldCreateUser: false } });
+      if (result.error) {
+        const message = method === 'phone' && /provider|phone/i.test(result.error.message)
+          ? 'SMS verification is not enabled in Supabase Auth. Enable a phone provider to send codes.'
+          : result.error.message;
+        return { error: message };
+      }
+      return { error: null };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Unable to send verification code.' };
+    }
+  };
+
+  const verifyVerificationCode = async (contact: string, code: string, method: 'email' | 'phone') => {
+    try {
+      const result = method === 'phone'
+        ? await supabase.auth.verifyOtp({ phone: normalizePhone(contact), token: code, type: 'sms' })
+        : await supabase.auth.verifyOtp({ email: contact, token: code, type: 'email' });
+      return { error: result.error?.message || null };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Unable to verify this code.' };
     }
   };
 

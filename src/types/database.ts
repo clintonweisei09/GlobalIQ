@@ -136,6 +136,7 @@ export type Task = {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   payout_amount: number;
   payout_currency: string;
+  unlock_fee: number;
   estimated_time_minutes: number;
   instructions: string | null;
   requirements: Json;
@@ -147,6 +148,7 @@ export type Task = {
   created_by: string | null;
   poster_name: string | null;
   poster_location: string | null;
+  poster_avatar_url: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -193,7 +195,14 @@ export type Withdrawal = {
   amount: number;
   currency: string;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
-  mpesa_phone: string;
+  mpesa_phone: string | null;
+  mpesa_destination_type: 'phone' | 'till';
+  mpesa_till_number: string | null;
+  withdrawal_method: 'mpesa' | 'bank';
+  bank_name: string | null;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  bank_branch_code: string | null;
   mpesa_transaction_id: string | null;
   failure_reason: string | null;
   processed_at: string | null;

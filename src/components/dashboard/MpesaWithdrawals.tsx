@@ -47,7 +47,9 @@ export default function MpesaWithdrawals() {
   const [withdrawPhone, setWithdrawPhone] = useState('');
   const [withdrawStage, setWithdrawStage] = useState<'idle' | 'initiating' | 'waiting' | 'success' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [successInfo, setSuccessInfo] = useState<{ kes: number; phone: string } | null>(null);
+  const [successInfo, setSuccessInfo] = useState<{ kes: number; recipient: string } | null>(null);
+  const [withdrawDestination, setWithdrawDestination] = useState<'phone' | 'till'>('phone');
+  const [withdrawTillNumber, setWithdrawTillNumber] = useState('1712962');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [currency, setCurrency] = useState<CurrencyCode>('USD');
   const [showCurrencyMenu, setShowCurrencyMenu] = useState(false);
@@ -122,7 +124,7 @@ export default function MpesaWithdrawals() {
         setWithdrawStage('success');
         setSuccessInfo({
           kes: parseFloat(withdrawAmount) * KES_RATE,
-          phone: withdrawPhone,
+          recipient: withdrawDestination === 'phone' ? withdrawPhone : withdrawTillNumber,
         });
         await refreshWallet();
         loadData();
@@ -141,7 +143,7 @@ export default function MpesaWithdrawals() {
   };
 
   const handleWithdraw = async () => {
-    if (!profile?.id || !withdrawPhone || !withdrawAmount) return;
+    if (!profile?.id || !withdrawAmount) return;
 
     const amount = parseFloat(withdrawAmount);
     if (isNaN(amount) || amount < 1 || amount > withdrawableBalance) {
@@ -150,9 +152,14 @@ export default function MpesaWithdrawals() {
     }
 
     const cleanPhone = withdrawPhone.replace(/[\s\-()]/g, '');
+    const cleanTillNumber = withdrawTillNumber.replace(/\s/g, '');
     const phoneRegex = /^(07\d{8}|01\d{8}|2547\d{8}|\+2547\d{8}|\+2541\d{8}|2541\d{8})$/;
-    if (!phoneRegex.test(cleanPhone)) {
+    if (withdrawDestination === 'phone' && !phoneRegex.test(cleanPhone)) {
       setError('Please enter a valid phone number (e.g., 0712345678 or 254712345678)');
+      return;
+    }
+    if (withdrawDestination === 'till' && !/^\d{5,7}$/.test(cleanTillNumber)) {
+      setError('Please enter a valid M-Pesa till number.');
       return;
     }
 
@@ -177,7 +184,9 @@ export default function MpesaWithdrawals() {
           apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({
-          phone: cleanPhone,
+          phone: withdrawDestination === 'phone' ? cleanPhone : undefined,
+          destinationType: withdrawDestination,
+          tillNumber: withdrawDestination === 'till' ? cleanTillNumber : undefined,
           amountUSD: amount,
         }),
       });
@@ -195,7 +204,7 @@ export default function MpesaWithdrawals() {
         setWithdrawStage('success');
         setSuccessInfo({
           kes: data.kesAmount,
-          phone: data.phone,
+          recipient: data.recipient || data.phone || data.tillNumber,
         });
         await refreshWallet();
         loadData();
@@ -428,7 +437,7 @@ export default function MpesaWithdrawals() {
                       <div className="flex flex-wrap items-center gap-4 text-sm text-secondary-500 dark:text-secondary-400">
                         <span className="flex items-center gap-1.5">
                           <Phone className="w-4 h-4" />
-                          {withdrawal.mpesa_phone}
+                          {withdrawal.mpesa_till_number || withdrawal.mpesa_phone || 'M-Pesa destination'}
                         </span>
                         <span className="flex items-center gap-1.5">
                           <Calendar className="w-4 h-4" />
@@ -493,9 +502,9 @@ export default function MpesaWithdrawals() {
       {/* Withdraw Modal */}
       {showWithdrawModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-secondary-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl animate-fade-in">
+          <div className="bg-white dark:bg-secondary-800 rounded-2xl max-w-sm w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
             {/* Modal Header */}
-            <div className="bg-gradient-to-br from-green-600 to-emerald-700 p-6 text-white relative">
+            <div className="bg-gradient-to-br from-green-600 to-emerald-700 p-5 text-white relative">
               <button
                 onClick={() => {
                   stopPolling();
@@ -510,7 +519,7 @@ export default function MpesaWithdrawals() {
               >
                 <X className="w-5 h-5" />
               </button>
-              <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mb-4 backdrop-blur-sm">
+              <div className="w-11 h-11 bg-white/15 rounded-xl flex items-center justify-center mb-3 backdrop-blur-sm">
                 {withdrawStage === 'success' ? (
                   <PartyPopper className="w-7 h-7" />
                 ) : withdrawStage === 'failed' ? (
@@ -533,7 +542,7 @@ export default function MpesaWithdrawals() {
               </p>
             </div>
 
-            <div className="p-6">
+            <div className="p-5">
               {/* Success State */}
               {withdrawStage === 'success' && successInfo ? (
                 <div className="text-center py-4">
@@ -544,7 +553,7 @@ export default function MpesaWithdrawals() {
                     {formatKES(parseFloat(withdrawAmount))}
                   </p>
                   <p className="text-sm text-secondary-500 dark:text-secondary-400 mb-4">
-                    sent to {successInfo.phone}
+                    sent to {successInfo.recipient}
                   </p>
                   <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 text-left">
                     <div className="flex items-start gap-2">
@@ -586,7 +595,7 @@ export default function MpesaWithdrawals() {
                           Sending {formatKES(parseFloat(withdrawAmount))} to {withdrawPhone}
                         </p>
                         <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
-                          This usually takes 10-30 seconds. You'll receive an M-Pesa message on your phone.
+                          This usually takes 10-30 seconds. Safaricom will confirm the transaction when it completes.
                         </p>
                       </div>
                     </div>
@@ -600,8 +609,13 @@ export default function MpesaWithdrawals() {
                     </p>
                   </div>
 
-                  {/* Phone Input */}
-                  <div className="mb-4">
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <button type="button" onClick={() => setWithdrawDestination('phone')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'phone' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>Phone number</button>
+                    <button type="button" onClick={() => setWithdrawDestination('till')} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${withdrawDestination === 'till' ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' : 'border-secondary-200 text-secondary-600 dark:border-secondary-600 dark:text-secondary-300'}`}>Till number</button>
+                  </div>
+
+                  {/* M-Pesa Destination Input */}
+                  {withdrawDestination === 'phone' ? <div className="mb-4">
                     <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
                       M-Pesa Phone Number
                     </label>
@@ -622,7 +636,11 @@ export default function MpesaWithdrawals() {
                     <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">
                       Enter your Safaricom number. You'll receive the funds here.
                     </p>
-                  </div>
+                  </div> : <div className="mb-4">
+                    <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">M-Pesa Till Number</label>
+                    <input type="text" inputMode="numeric" value={withdrawTillNumber} onChange={(e) => { setWithdrawTillNumber(e.target.value); setError(null); }} disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting'} placeholder="1712962" className="w-full px-4 py-3 border border-secondary-200 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-secondary-700 text-secondary-900 dark:text-white disabled:opacity-60" />
+                    <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">The till must be enabled for Safaricom B2B payments.</p>
+                  </div>}
 
                   {/* Amount Input */}
                   <div className="mb-4">
@@ -676,7 +694,7 @@ export default function MpesaWithdrawals() {
                   {/* Security Note */}
                   <div className="flex items-center gap-2 text-xs text-secondary-500 dark:text-secondary-400 mb-5">
                     <ShieldCheck className="w-4 h-4 text-green-600 dark:text-green-400" />
-                    Secured by Safaricom M-Pesa B2C API
+                    Secured by Safaricom M-Pesa {withdrawDestination === 'phone' ? 'B2C' : 'B2B'} API
                   </div>
 
                   {/* Action Buttons */}
@@ -697,7 +715,7 @@ export default function MpesaWithdrawals() {
                     </button>
                     <button
                       onClick={handleWithdraw}
-                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting' || !withdrawPhone || !withdrawAmount || parseFloat(withdrawAmount) < 1}
+                      disabled={withdrawStage === 'initiating' || withdrawStage === 'waiting' || (withdrawDestination === 'phone' ? !withdrawPhone : !withdrawTillNumber) || !withdrawAmount || parseFloat(withdrawAmount) < 1}
                       className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
                     >
                       {withdrawStage === 'initiating' || withdrawStage === 'waiting' ? (

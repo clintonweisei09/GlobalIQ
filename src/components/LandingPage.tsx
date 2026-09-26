@@ -215,7 +215,7 @@ function LandingPage() {
     },
     {
       question: 'Why do I need to unlock tasks individually?',
-      answer: 'Each task is locked separately with a small unlock fee (KES 1 via M-Pesa). This ensures only serious workers access tasks, which keeps quality high and payouts competitive. When you unlock one task, others remain locked until you choose to unlock them too.',
+      answer: 'Each task is locked separately with an unlock fee between KES 100 and KES 250 via M-Pesa. This ensures only serious workers access tasks, which keeps quality high and payouts competitive. When you unlock one task, others remain locked until you choose to unlock them too.',
     },
     {
       question: 'Is it free to join?',
@@ -308,7 +308,7 @@ function LandingPage() {
 
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-secondary-900 leading-[1.1] mb-6 text-balance">
                 Get paid to complete{' '}
-                <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-red-600 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-shift">real online tasks.</span>
+                <span className="landing-gradient-title">real online tasks.</span>
               </h1>
 
               <p className="text-lg md:text-xl text-secondary-600 mb-8 max-w-xl mx-auto lg:mx-0 leading-relaxed">
@@ -453,7 +453,7 @@ function LandingPage() {
               Simple 3-Step Process
             </span>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-red-600 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-shift">Start earning in minutes</span>
+              <span className="landing-gradient-title">Start earning in minutes</span>
             </h2>
             <p className="text-lg text-secondary-600 max-w-2xl mx-auto">
               No special skills required. If you can use a phone, you can earn.
@@ -494,7 +494,7 @@ function LandingPage() {
               Transparent Payment Flow
             </span>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-red-600 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-shift">How you get paid</span>
+              <span className="landing-gradient-title">How you get paid</span>
             </h2>
             <p className="text-lg text-secondary-600 max-w-2xl mx-auto">
               Every task goes through a clear, trackable payment process. You always know where your money is.
@@ -550,7 +550,7 @@ function LandingPage() {
               Earning Opportunities
             </span>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-red-600 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-shift">Choose how you want to earn</span>
+              <span className="landing-gradient-title">Choose how you want to earn</span>
             </h2>
             <p className="text-lg text-secondary-600 max-w-2xl mx-auto">
               Over 10,000 tasks available right now. Each task shows its payout upfront.
@@ -594,7 +594,7 @@ function LandingPage() {
               Real Reviews
             </span>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-emerald-400 via-teal-400 to-red-400 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-shift">Real people. Real payments.</span>
+              <span className="landing-gradient-title bg-gradient-to-r from-emerald-400 via-teal-400 to-red-400">Real people. Real payments.</span>
             </h2>
             <p className="text-lg text-secondary-300 max-w-2xl mx-auto">
               Don't take our word for it — hear from members who've cashed out.
@@ -633,7 +633,7 @@ function LandingPage() {
           <div className="text-center mb-14">
             <span className="inline-block bg-emerald-100 text-emerald-800 px-4 py-2 rounded-full text-sm font-semibold mb-4">FAQ</span>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-red-600 bg-[length:200%_auto] bg-clip-text text-transparent animate-gradient-shift">Questions? Answered.</span>
+              <span className="landing-gradient-title">Questions? Answered.</span>
             </h2>
           </div>
 
@@ -742,14 +742,12 @@ function LandingPage() {
             ))}
           </div>
 
-          <div className="border-t border-secondary-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="flex flex-col items-center md:items-start gap-2">
-              <p className="text-secondary-500 text-sm">© 2026 EarnIQ. All rights reserved.</p>
-              <p className="text-xs text-secondary-600">
-                Developed by <span className="font-semibold bg-gradient-to-r from-emerald-400 to-red-400 bg-clip-text text-transparent">Clinton Weisei</span>
-              </p>
-            </div>
-            <div className="flex gap-6">
+          <div className="border-t border-secondary-800 pt-8 grid grid-cols-1 md:grid-cols-3 items-center gap-4">
+            <p className="text-secondary-500 text-sm text-center md:text-left">© 2026 EarnIQ. All rights reserved.</p>
+            <p className="text-sm text-center text-secondary-400">
+              Developed by <span className="font-semibold text-white">Clinton Weisei</span>
+            </p>
+            <div className="flex justify-center md:justify-end gap-6">
               {footerLinks.legal.map((link, i) => (
                 <a key={i} href="#" className="text-secondary-500 hover:text-emerald-400 text-sm transition-colors">{link}</a>
               ))}

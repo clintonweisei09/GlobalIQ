@@ -9,7 +9,9 @@ import LandingPage from './components/LandingPage';
 import SignUpPage from './components/auth/SignUpPage';
 import LoginPage from './components/auth/LoginPage';
 import ForgotPasswordPage from './components/auth/ForgotPasswordPage';
+import ResetPasswordPage from './components/auth/ResetPasswordPage';
 import VerifyEmailPage from './components/auth/VerifyEmailPage';
+import AuthCallbackPage from './components/auth/AuthCallbackPage';
 import ProfileSetupPage from './components/auth/ProfileSetupPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 
@@ -51,7 +53,9 @@ function App() {
       <Route path="/auth/signup" element={<SignUpPage />} />
       <Route path="/auth/login" element={<LoginPage />} />
       <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/auth/setup" element={<ProfileSetupPage />} />
 
       {/* Dashboard Routes */}
